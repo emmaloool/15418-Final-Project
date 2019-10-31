@@ -1,7 +1,3 @@
-## Accelerating the WebP Decoding Pipeline
-
-This is the project page for our 15-418 (Fall 2019) final project. 
-
 ### Summary
 
 We intend to implement one of the stages of the WebP image decoding pipeline on NVIDIA GPUs, to take advantage of the parallelism offered by GPUs. To do so, we will study the algorithms used and the reference implementation of WebP decoding, and rewrite one portion of the pipeline to best take advantage of GPU computing.
