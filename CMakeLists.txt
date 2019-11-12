@@ -1,6 +1,6 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.8 FATAL_ERROR)
 
-project(WebP C)
+project(WebP C CUDA)
 
 # Options for coder / decoder executables.
 option(WEBP_ENABLE_SIMD "Enable any SIMD optimization." ON)
@@ -50,6 +50,7 @@ endif()
 # Include dependencies.
 include(cmake/deps.cmake)
 include(GNUInstallDirs)
+include(CTest)
 
 # ##############################################################################
 # Options.
@@ -168,7 +169,7 @@ if(MSVC)
   # avoid security warnings for e.g., fopen() used in the examples.
   add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
-  add_definitions(-Wall)
+  #add_definitions(-Wall)
 endif()
 include_directories(${WEBP_DEP_INCLUDE_DIRS})
 add_library(webpdecode OBJECT ${WEBP_DEC_SRCS})
@@ -199,7 +200,8 @@ target_include_directories(
 set_target_properties(
   webpdecoder
   PROPERTIES PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/webp/decode.h;\
-${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h")
+${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h"
+             CUDA_SEPARABLE_COMPILATION ON)
 
 configure_pkg_config("src/libwebpdecoder.pc")
 
@@ -238,7 +240,8 @@ set_target_properties(
   webp
   PROPERTIES PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/webp/decode.h;\
 ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/encode.h;\
-${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h")
+${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h"
+             CUDA_SEPARABLE_COMPILATION ON)
 
 # Make sure the OBJECT libraries are built with position independent code (it is
 # not ON by default).
@@ -263,7 +266,8 @@ set_target_properties(
   PROPERTIES PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/src/webp/decode.h;\
 ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/demux.h;\
 ${CMAKE_CURRENT_SOURCE_DIR}/src/webp/mux_types.h;\
-${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h")
+${CMAKE_CURRENT_SOURCE_DIR}/src/webp/types.h"
+             CUDA_SEPARABLE_COMPILATION ON)
 
 configure_pkg_config("src/demux/libwebpdemux.pc")
 
@@ -354,11 +358,15 @@ if(WEBP_BUILD_ANIM_UTILS
   target_include_directories(
     exampleutil
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>)
+  set_property(TARGET exampleutil
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
   parse_makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEIOUTILS_SRCS"
                     "imageio_util_[^ ]*")
   add_library(imageioutil STATIC ${IMAGEIOUTILS_SRCS})
   target_link_libraries(imageioutil webp)
+  set_property(TARGET imageioutil
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
   # Image-decoding utility library.
   parse_makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEDEC_SRCS"
@@ -369,6 +377,8 @@ if(WEBP_BUILD_ANIM_UTILS
                         webpdemux
                         webp
                         ${WEBP_DEP_IMG_LIBRARIES})
+  set_property(TARGET imagedec
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
   # Image-encoding utility library.
   parse_makefile_am(${CMAKE_CURRENT_SOURCE_DIR}/imageio "IMAGEENC_SRCS"
@@ -382,6 +392,8 @@ if(WEBP_BUILD_ANIM_UTILS
                       imageenc
                PROPERTY INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src
                         ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET exampleutil
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 endif()
 
 if(WEBP_BUILD_DWEBP)
@@ -390,6 +402,8 @@ if(WEBP_BUILD_DWEBP)
   add_executable(dwebp ${DWEBP_SRCS})
   target_link_libraries(dwebp exampleutil imagedec imageenc)
   target_include_directories(dwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET dwebp
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS dwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -399,6 +413,8 @@ if(WEBP_BUILD_CWEBP)
   add_executable(cwebp ${CWEBP_SRCS})
   target_link_libraries(cwebp exampleutil imagedec webp)
   target_include_directories(cwebp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET cwebp
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS cwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -409,6 +425,8 @@ if(WEBP_BUILD_GIF2WEBP OR WEBP_BUILD_IMG2WEBP)
   target_include_directories(libwebpmux
                              PRIVATE ${CMAKE_CURRENT_BINARY_DIR}
                                      ${CMAKE_CURRENT_SOURCE_DIR})
+  set_property(TARGET libwebpmux
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   parse_version(mux/Makefile.am webpmux WEBP_MUX_SOVERSION)
   set_target_properties(libwebpmux
                         PROPERTIES VERSION
@@ -438,6 +456,8 @@ if(WEBP_BUILD_GIF2WEBP)
                         libwebpmux
                         ${WEBP_DEP_GIF_LIBRARIES})
   target_include_directories(gif2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET gif2webp
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS gif2webp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -453,6 +473,8 @@ if(WEBP_BUILD_IMG2WEBP)
                         imageioutil
                         webp
                         libwebpmux)
+  set_property(TARGET img2webp
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   target_include_directories(img2webp PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
   install(TARGETS img2webp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
@@ -475,6 +497,8 @@ if(WEBP_BUILD_VWEBP)
                                PRIVATE ${GLUT_INCLUDE_DIR}
                                        ${CMAKE_CURRENT_BINARY_DIR}/src
                                        ${OPENGL_INCLUDE_DIR})
+    set_property(TARGET vwebp
+      PROPERTY CUDA_SEPARABLE_COMPILATION ON)
     install(TARGETS vwebp RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
     if(${CMAKE_SYSTEM_NAME} STREQUAL "Darwin")
       check_c_compiler_flag("-Wno-deprecated-declarations" HAS_NO_DEPRECATED)
@@ -493,6 +517,8 @@ if(WEBP_BUILD_WEBPINFO)
   add_executable(webpinfo ${WEBPINFO_SRCS})
   target_link_libraries(webpinfo exampleutil imageioutil)
   target_include_directories(webpinfo PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET webpinfo
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS webpinfo RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -503,6 +529,8 @@ if(WEBP_BUILD_WEBPMUX)
   add_executable(webpmux ${WEBPMUX_SRCS})
   target_link_libraries(webpmux exampleutil imageioutil libwebpmux webp)
   target_include_directories(webpmux PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET webpmux
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS webpmux RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
@@ -520,12 +548,16 @@ if(WEBP_BUILD_EXTRAS)
                              PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
                                      ${CMAKE_CURRENT_SOURCE_DIR}/src
                                      ${CMAKE_CURRENT_BINARY_DIR}/src)
+  set_property(TARGET get_disto
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS get_disto RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
   # webp_quality
   add_executable(webp_quality ${WEBP_QUALITY_SRCS} ${WEBP_EXTRAS_SRCS})
   target_link_libraries(webp_quality exampleutil imagedec)
   target_include_directories(webp_quality PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  set_property(TARGET webp_quality
+    PROPERTY CUDA_SEPARABLE_COMPILATION ON)
   install(TARGETS webp_quality RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
   # vwebp_sdl
@@ -539,6 +571,8 @@ if(WEBP_BUILD_EXTRAS)
                                        ${CMAKE_CURRENT_BINARY_DIR}
                                        ${CMAKE_CURRENT_BINARY_DIR}/src
                                        ${SDL_INCLUDE_DIR})
+    set_property(TARGET vwebp_sdl
+      PROPERTY CUDA_SEPARABLE_COMPILATION ON)
     set(WEBP_HAVE_SDL 1)
     target_compile_definitions(vwebp_sdl PUBLIC WEBP_HAVE_SDL)
     install(TARGETS vwebp_sdl RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

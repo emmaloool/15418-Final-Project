@@ -13,6 +13,7 @@ noinst_LTLIBRARIES += libwebpdsp_mips32.la
 noinst_LTLIBRARIES += libwebpdspdecode_mips32.la
 noinst_LTLIBRARIES += libwebpdsp_mips_dsp_r2.la
 noinst_LTLIBRARIES += libwebpdspdecode_mips_dsp_r2.la
+noinst_LTLIBRARIES += libwebpdsp_cuda.la  # ADDED
 
 if BUILD_LIBWEBPDECODER
   noinst_LTLIBRARIES += libwebpdspdecode.la
@@ -152,6 +153,13 @@ libwebpdsp_mips_dsp_r2_la_CPPFLAGS = $(libwebpdsp_la_CPPFLAGS)
 libwebpdsp_mips_dsp_r2_la_CFLAGS = $(AM_CFLAGS)
 libwebpdsp_mips_dsp_r2_la_LIBADD = libwebpdspdecode_mips_dsp_r2.la
 
+# ADDED
+libwebpdsp_cuda_la_SOURCES =
+libwebpdsp_cuda_la_SOURCES += lossless_enc_cuda.cu
+libwebpdsp_cuda_la_CPPFLAGS =
+libwebpdsp_cuda_la_CFLAGS = -m64
+libwebpdsp_cuda_la_LIBADD =
+
 libwebpdsp_la_SOURCES = $(COMMON_SOURCES) $(ENC_SOURCES)
 
 noinst_HEADERS =
@@ -169,6 +177,7 @@ libwebpdsp_la_LIBADD += libwebpdsp_neon.la
 libwebpdsp_la_LIBADD += libwebpdsp_msa.la
 libwebpdsp_la_LIBADD += libwebpdsp_mips32.la
 libwebpdsp_la_LIBADD += libwebpdsp_mips_dsp_r2.la
+libwebpdsp_la_LIBADD += libwebpdsp_cuda.la  # ADDED
 
 if BUILD_LIBWEBPDECODER
   libwebpdspdecode_la_SOURCES = $(COMMON_SOURCES)

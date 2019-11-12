@@ -996,6 +996,10 @@ WEBP_DSP_INIT_FUNC(VP8LEncDspInit) {
   }
 #endif
 
+#if defined(WEBP_USE_CUDA)
+  VP8LEncDspInitCUDA();
+#endif
+
   assert(VP8LSubtractGreenFromBlueAndRed != NULL);
   assert(VP8LTransformColor != NULL);
   assert(VP8LCollectColorBlueTransforms != NULL);

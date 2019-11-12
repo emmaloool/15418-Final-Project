@@ -128,6 +128,12 @@ extern "C" {
 #define WEBP_NEON_WORK_AROUND_GCC 0
 #endif
 
+// ADDED
+// Just enable cuda...
+#ifndef WEBP_USE_CUDA
+#define WEBP_USE_CUDA
+#endif
+
 // This macro prevents thread_sanitizer from reporting known concurrent writes.
 #define WEBP_TSAN_IGNORE_FUNCTION
 #if defined(__has_feature)
