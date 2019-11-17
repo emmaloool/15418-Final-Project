@@ -21,6 +21,16 @@
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
 
+
+#define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
+inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true) {
+    if (code != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s at %s:%d\n",
+            cudaGetErrorString(code), file, line);
+        if (abort) exit(code);
+    }
+}
+
 //------------------------------------------------------------------------------
 // Subtract-Green Transform
 
@@ -46,17 +56,18 @@ static void SubtractGreenFromBlueAndRed_CUDA(uint32_t* argb_data,
 
     // Allocate device memory buffer for result on the GPU
     uint32_t* result;
-    cudaMalloc(&result, num_pixels * sizeof(uint32_t));
+    cudaCheckError(cudaMalloc(&result, num_pixels * sizeof(uint32_t)));
 
     // Copy input arrays to the GPU using cudaMemcpy
-    cudaMemcpy(result, argb_data, num_pixels * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaCheckError(cudaMemcpy(result, argb_data, num_pixels * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
     SubtractGreenFromBlueAndRed_kernel<<<blocks, threadsPerBlock>>>(result, num_pixels);
 
     // Copy result from GPU using cudaMemcpy
-    cudaMemcpy(argb_data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    cudaCheckError(cudaMemcpy(argb_data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost))
 
+    cudaCheckError(cudaFree(result));
 }
 
 //------------------------------------------------------------------------------
@@ -70,7 +81,7 @@ __device__ __inline__  int8_t U32ToS8(uint32_t v) {
     return (int8_t)(v & 0xff);
 }
 
-__global__ void TransformColor_kernel(const VP8LMultipliers* const m, 
+__global__ void TransformColor_kernel(int green_to_red, int green_to_blue, int red_to_blue, 
                                             uint32_t* data, 
                                             int num_pixels) {
 
@@ -78,15 +89,15 @@ __global__ void TransformColor_kernel(const VP8LMultipliers* const m,
     int index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_pixels) return;    // loop guard: for 0 <= i < num_pixels
 
-    const uint32_t argb = data[i];
+    const uint32_t argb = data[index];
     const int8_t green = U32ToS8(argb >>  8);
     const int8_t red   = U32ToS8(argb >> 16);
     int new_red = red & 0xff;
     int new_blue = argb & 0xff;
-    new_red -= ColorTransformDelta(m->green_to_red_, green);
+    new_red -= ColorTransformDelta(green_to_red, green);
     new_red &= 0xff;
-    new_blue -= ColorTransformDelta(m->green_to_blue_, green);
-    new_blue -= ColorTransformDelta(m->red_to_blue_, red);
+    new_blue -= ColorTransformDelta(green_to_blue, green);
+    new_blue -= ColorTransformDelta(red_to_blue, red);
     new_blue &= 0xff;
     data[index] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
 
@@ -101,17 +112,19 @@ static void TransformColor_CUDA(const VP8LMultipliers* const m,
 
     // Allocate device memory buffer for result on the GPU
     uint32_t* result;
-    cudaMalloc(&result, num_pixels * sizeof(uint32_t));
+
+    cudaCheckError(cudaMalloc(&result, num_pixels * sizeof(uint32_t)));
 
     // Copy input params to the GPU using cudaMemcpy
-    cudaMemcpy(result, data, num_pixels * sizeof(uint32_t), cudaMemcpyHostToDevice);
+    cudaCheckError(cudaMemcpy(result, data, num_pixels * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
-    TransformColor_kernel<<<blocks, threadsPerBlock>>>(m, result, num_pixels);
+    TransformColor_kernel<<<blocks, threadsPerBlock>>>(m->green_to_red_, m->green_to_blue_, m->red_to_blue_, result, num_pixels);
 
     // Copy result from GPU using cudaMemcpy
-    cudaMemcpy(data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost);
+    cudaCheckError(cudaMemcpy(data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
+    cudaCheckError(cudaFree(result));
 }
 
 //------------------------------------------------------------------------------
@@ -136,157 +149,130 @@ __device__ __inline__ uint8_t TransformColorBlue(uint8_t green_to_blue,
   return (new_blue & 0xff);
 }
 
-
-/*void VP8LCollectColorRedTransforms_C(const uint32_t* argb, int stride,
-                                     int tile_width, int tile_height,
-                                     int green_to_red, int histo[]) {
-  while (tile_height-- > 0) {
-    int x;
-    for (x = 0; x < tile_width; ++x) {
-      ++histo[TransformColorRed((uint8_t)green_to_red, argb[x])];
-    }
-    argb += stride;
-  }
-
-
-// int y_limit = tile_height * stride;
-// for (y = 1; y < tile_height; y++) {
-//     for (x = 0; x < tile_width; x++) {
-//         // I'm assuming that this line is equivalent to: 
-//         // ++histo[TransformColorRed((uint8_t)green_to_red, argb[x])];
-        
-//     }
-//     argb += (tile_height - 1 - y) * stride;
-// }
-
-
-// for (t_h = tile_height - 1; t_h > 0; t_h -= 1) {
-//     for (x = 0; x < tile_width; ++x) {
-//         // I'm assuming that this line is equivalent to: 
-//         //++histo[TransformColorRed((uint8_t)green_to_red, argb[x])];
-        
-//     }
-//     argb += stride;
-// }
-
-
-// while (tile_height-- > 0) {          // INCREMENT FIRST, so range is from (tile_height - 1) to 1
-//     int x;
-//     for (x = 0; x < tile_width; ++x) {
-//       ++histo[TransformColorRed((uint8_t)green_to_red, argb[x])];
-//     }
-//     argb += stride;
-// }
-}*/
-
-
-__device__ void CollectColorRedTransforms_kernel(const uint32_t* argb, int stride,
+__global__ void CollectColorRedTransforms_kernel(const uint32_t* argb, int stride,
                                  int tile_width, int tile_height,
                                  int green_to_red, int histo[]) {
 
     // Overall index from position of thread in current block, and given the block we are in.
-    int index = blockIdx.y * blockDim.x + threadIdx.x;
-    if (index >= tile_width * tile_height) return;    // loop guard: for 0 <= i < num_pixels
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int ind = y * tile_width + x;
 
-    // The hell is the length of histo???
-    __shared__ int histo_temp;
-    int transform_index = TransformColorRed((uint8_t)green_to_red, argb[(tile_height - 1 - threadIdy.y) * stride + index])];
-    histo_temp[transform_index] = histo[transform_index];
-    atomicAdd(histo_temp[transformindex]);
-
+    __shared__ int histo_temp[256];
+    if (ind < 256) histo_temp[ind] = 0;
     __syncthreads();
 
-    histo[transform_index] = histo_temp[transform_index];
+    if (x < tile_width && y < tile_height) {
+        int transform_index = TransformColorRed((uint8_t)green_to_red, argb[stride * y + x]);
+        atomicAdd(&histo_temp[transform_index], 1);
+    }
+    __syncthreads();
 
+    if (ind < 256) atomicAdd(&histo[ind], histo_temp[ind]);
+    __syncthreads();
 }
 
 static void CollectColorRedTransforms_CUDA(const uint32_t* argb, int stride,
                                      int tile_width, int tile_height,
                                      int green_to_red, int histo[]) {
+      // Dimensions
+    dim3 blockDim(16, 16);
+    dim3 gridDim((tile_width  + blockDim.x - 1) / blockDim.x,
+                 (tile_height + blockDim.y - 1) / blockDim.y);
 
-    // Compute number of blocks and threads per block
-    const int threadsPerBlock = 512;
-    const int blocks = (num_pixels + threadsPerBlock - 1) / threadsPerBlock;
+    size_t argb_size = tile_height * (stride - 1) + tile_width;
 
     // Allocate device memory buffer for result on the GPU
     uint32_t *argb_result;
-    int histo_result[];
-    cudaMalloc(&argb_result, tile_height * tile_width * sizeof(uint32_t));
-    cudaMalloc(&histo_result, tile_height * tile_width * sizeof(int));
+    int *histo_result;
+    //printf("tile_height * stride = %d * %d = %d\n", tile_height, stride, tile_height * stride);
+    cudaCheckError(cudaMalloc(&histo_result, 256 * sizeof(int)));
+    cudaCheckError(cudaMalloc(&argb_result, argb_size * sizeof(uint32_t)));
 
     // Copy input params to the GPU using cudaMemcpy
-    cudaMemcpy(argb_result, argb, tile_height * tile_width * sizeof(uint32_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(histo_result, histo, tile_height * tile_width * sizeof(int), cudaMemcpyHostToDevice);
+    cudaCheckError(cudaMemcpy(histo_result, histo, 256 * sizeof(int), cudaMemcpyHostToDevice));
+    cudaCheckError(cudaMemcpy(argb_result, argb, argb_size * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
-    CollectColorRedTransforms_kernel<<<blocks, threadsPerBlock>>>(argb_result, stride, tile_width, tile_height, green_to_red, histo_result);
+    CollectColorRedTransforms_kernel<<<gridDim, blockDim>>>(argb_result, stride, tile_width, tile_height, green_to_red, histo_result);
 
     // Copy result from GPU using cudaMemcpy
-    cudaMemcpy(histo, histo_result, tile_height * tile_width * sizeof(int), cudaMemcpyDeviceToHost); //only histo modified
+    cudaCheckError(cudaMemcpy(histo, histo_result, 256 * sizeof(int), cudaMemcpyDeviceToHost)); //only histo modified
+
+    cudaCheckError(cudaFree(argb_result));
+    cudaCheckError(cudaFree(histo_result));
 
 }
 
 
-// void VP8LCollectColorBlueTransforms_C(const uint32_t* argb, int stride,
-//                                       int tile_width, int tile_height,
-//                                       int green_to_blue, int red_to_blue,
-//                                       int histo[]) {
-//   while (tile_height-- > 0) {
-//     int x;
-//     for (x = 0; x < tile_width; ++x) {
-//       ++histo[TransformColorBlue((uint8_t)green_to_blue, (uint8_t)red_to_blue,
-//                                  argb[x])];
-//     }
-//     argb += stride;
-//   }
-// }
-
-__device__ void CollectColorBlueTransforms_kernel(const uint32_t* argb, int stride,
+__global__ void CollectColorBlueTransforms_kernel(const uint32_t* argb, int stride,
                                                     int tile_width, int tile_height,
                                                     int green_to_blue, int red_to_blue,
                                                     int histo[]) {
-
     // Overall index from position of thread in current block, and given the block we are in.
-    int index = blockIdx.y * blockDim.x + threadIdx.x;
-    if (index >= tile_width * tile_height) return;    // loop guard: for 0 <= i < num_pixels
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    int ind = threadIdx.y * blockDim.x + threadIdx.x;
 
-    // The hell is the length of histo???
-    __shared__ int histo_temp;
-    int transform_index = TransformColorBlue((uint8_t)green_to_blue, (uint8_t)red_to_blue, argb[(tile_height - 1 - threadIdy.y) * stride + index])];
-    histo_temp[transform_index] = histo[transform_index];
-    atomicAdd(histo_temp[transformindex]);
-
+    __shared__ int histo_temp[256];
+    if (ind < 256) histo_temp[ind] = 0;
     __syncthreads();
 
-    histo[transform_index] = histo_temp[transform_index];
+    if (x < tile_width && y < tile_height) {
+        //printf("stride * y + x = %d * %d + %d = %d\n", );
+        int transform_index = TransformColorBlue((uint8_t)green_to_blue, (uint8_t)red_to_blue, argb[stride * y + x]);
+        // printf("BEFORE: histo_temp[%d] = %d\n", transform_index, histo_temp[transform_index]);
+        atomicAdd(&histo_temp[transform_index], 1);
+        // printf("tile_height * stride = %d * %d = %d. ||  stride * y + x = %d * %d + %d = %d. ||  histo_temp[%d] = %d\n",
+        //     tile_height, stride, tile_height * stride,
+        //     stride, y, x, stride * y + x,
+        //     transform_index, histo_temp[transform_index]);
+    }
+    __syncthreads();
+
+    if (ind < 256) {
+        atomicAdd(&histo[ind], histo_temp[ind]);
+
+        //printf("value @ ind = %d: \t histo_temp: %d, histo: %d\n", ind, histo_temp[ind], histo[ind]);
+    }
+    __syncthreads();
+
+    //printf("histo[0] = %d\n", histo[0]);
 
 }
+
 
 static void CollectColorBlueTransforms_CUDA(const uint32_t* argb, int stride,
                                             int tile_width, int tile_height,
                                             int green_to_blue, int red_to_blue,
                                             int histo[]) {
 
-    // Compute number of blocks and threads per block
-    const int threadsPerBlock = 512;
-    const int blocks = (num_pixels + threadsPerBlock - 1) / threadsPerBlock;
+    // Dimensions
+    dim3 blockDim(16, 16);
+    dim3 gridDim((tile_width  + blockDim.x - 1) / blockDim.x,
+                 (tile_height + blockDim.y - 1) / blockDim.y);
+
+    size_t argb_size = tile_height * (stride - 1) + tile_width;
 
     // Allocate device memory buffer for result on the GPU
     uint32_t *argb_result;
-    int histo_result[];
-    cudaMalloc(&argb_result, tile_height * tile_width * sizeof(uint32_t));
-    cudaMalloc(&histo_result, tile_height * tile_width * sizeof(int));
+    int *histo_result;
+    //printf("tile_height * stride = %d * %d = %d\n", tile_height, stride, tile_height * stride);
+    cudaCheckError(cudaMalloc(&histo_result, 256 * sizeof(int)));
+    cudaCheckError(cudaMalloc(&argb_result, argb_size * sizeof(uint32_t)));
 
     // Copy input params to the GPU using cudaMemcpy
-    cudaMemcpy(argb_result, argb, tile_height * tile_width * sizeof(uint32_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(histo_result, histo, tile_height * tile_width * sizeof(int), cudaMemcpyHostToDevice);
+    cudaCheckError(cudaMemcpy(histo_result, histo, 256 * sizeof(int), cudaMemcpyHostToDevice));
+    cudaCheckError(cudaMemcpy(argb_result, argb, argb_size * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
-    CollectColorBlueTransforms_kernel<<<blocks, threadsPerBlock>>>(argb_result, stride, tile_width, tile_height, green_to_blue, red_to_blue, histo_result);
+    CollectColorBlueTransforms_kernel<<<gridDim, blockDim>>>(argb_result, stride, tile_width, tile_height, green_to_blue, red_to_blue, histo_result);
 
     // Copy result from GPU using cudaMemcpy
-    cudaMemcpy(histo, histo_result, tile_height * tile_width * sizeof(int), cudaMemcpyDeviceToHost); //only histo modified
+    cudaCheckError(cudaMemcpy(histo, histo_result, 256 * sizeof(int), cudaMemcpyDeviceToHost)); //only histo modified
 
+    cudaCheckError(cudaFree(argb_result));
+    cudaCheckError(cudaFree(histo_result));
 }
 
 
