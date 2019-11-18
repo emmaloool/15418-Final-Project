@@ -18,6 +18,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <chrono>
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
 
@@ -30,6 +31,11 @@ inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=
         if (abort) exit(code);
     }
 }
+
+static double duration_to_double(std::chrono::duration<int64_t, std::nano> d) {
+    return std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1>>>(d).count();
+}
+
 
 //------------------------------------------------------------------------------
 // Subtract-Green Transform
@@ -68,6 +74,33 @@ static void SubtractGreenFromBlueAndRed_CUDA(uint32_t* argb_data,
     cudaCheckError(cudaMemcpy(argb_data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost))
 
     cudaCheckError(cudaFree(result));
+}
+
+static void SubtractGreenFromBlueAndRed_Wrapper(
+        uint32_t* argb_data, int num_pixels) {
+
+    uint32_t *argb_data_copy = (uint32_t *) malloc(sizeof(*argb_data_copy) * num_pixels);
+    memcpy(argb_data_copy, argb_data, sizeof(*argb_data_copy) * num_pixels);
+
+    double duration_cuda;
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        SubtractGreenFromBlueAndRed_CUDA(argb_data, num_pixels);
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_cuda = duration_to_double(end - start);
+    }
+
+    double duration_c;
+    {
+        auto start = std::chrono::high_resolution_clock::now();
+        VP8LSubtractGreenFromBlueAndRed_C(argb_data_copy, num_pixels);
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_c = duration_to_double(end - start);
+    }
+
+    printf("SubtractGreenFromBlueAndRed: duration_cuda = %f, duration_C = %f\n",
+        duration_cuda, duration_c);
+    free(argb_data_copy);
 }
 
 //------------------------------------------------------------------------------
@@ -316,6 +349,9 @@ static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
     cudaMemcpy(device_row, row, sizeof(*device_row) * width, cudaMemcpyHostToDevice);
     VP8LBundleColorMap_kernel<<<num_blocks, threads_per_block>>>(device_row, width, xbits, dst);
     cudaMemcpy(dst, device_dst, sizeof(*dst) * num_tasks, cudaMemcpyDeviceToHost);
+
+    cudaFree(device_row);
+    cudaFree(device_dst);
 }
 
 
@@ -325,11 +361,11 @@ static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
 extern "C" void VP8LEncDspInitCUDA(void);
 
 WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitCUDA(void) {
-    VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_CUDA;
-    VP8LTransformColor = TransformColor_CUDA;
-    VP8LCollectColorRedTransforms = CollectColorRedTransforms_CUDA;
-    VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_CUDA;
-    VP8LBundleColorMap = BundleColorMap_CUDA;
+    VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_Wrapper;
+    //VP8LTransformColor = TransformColor_CUDA;
+    //VP8LCollectColorRedTransforms = CollectColorRedTransforms_CUDA;
+    //VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_CUDA;
+    //VP8LBundleColorMap = BundleColorMap_CUDA;
 }
 
 #else  // !WEBP_USE_SSE2

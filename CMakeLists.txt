@@ -73,6 +73,7 @@ set(libdir "\$\{prefix\}/lib")
 set(includedir "\$\{prefix\}/include")
 set(PTHREAD_LIBS ${CMAKE_THREAD_LIBS_INIT})
 set(INSTALLED_LIBRARIES)
+set(CMAKE_CUDA_STANDARD 11)
 
 # ##############################################################################
 # Android only.
