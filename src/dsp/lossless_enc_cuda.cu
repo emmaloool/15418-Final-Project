@@ -276,6 +276,49 @@ static void CollectColorBlueTransforms_CUDA(const uint32_t* argb, int stride,
 }
 
 
+__global__ void VP8LBundleColorMap_kernel(const uint8_t *row, int width, int xbits,
+                                          uint32_t *dst) {
+
+    const int num_tasks = width >> xbits;
+    const int bundle_size = 1 << xbits;
+    const int bit_depth = 1 << (3 - xbits);
+
+    // Compute index in destination array
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= num_tasks) return;
+
+    // Perform computation
+    uint32_t code = 0xff000000;
+    for (int xsub = 0; xsub < bundle_size; ++xsub) {
+        code |= row[bundle_size * index + xsub] << (8 + bit_depth * xsub);
+    }
+    dst[index] = code;
+}
+
+
+static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
+                                uint32_t *dst) {
+
+    printf("HELLO WORLD WE ARE CALLING BundleColorMap_CUDA\n");
+
+    // Compute number of tasks
+    const int num_tasks = width >> xbits;
+    const int threads_per_block = 512;
+    const int num_blocks = (num_tasks + threads_per_block - 1) / threads_per_block;
+
+    // Allocate device memory buffers
+    uint8_t *device_row;
+    uint32_t *device_dst;
+    cudaMalloc(&device_row, sizeof(*device_row) * width);
+    cudaMalloc(&device_dst, sizeof(*device_dst) * num_tasks);
+
+    // Compute result
+    cudaMemcpy(device_row, row, sizeof(*device_row) * width, cudaMemcpyHostToDevice);
+    VP8LBundleColorMap_kernel<<<num_blocks, threads_per_block>>>(device_row, width, xbits, dst);
+    cudaMemcpy(dst, device_dst, sizeof(*dst) * num_tasks, cudaMemcpyDeviceToHost);
+}
+
+
 //------------------------------------------------------------------------------
 // Entry point
 
@@ -286,6 +329,7 @@ WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitCUDA(void) {
     VP8LTransformColor = TransformColor_CUDA;
     VP8LCollectColorRedTransforms = CollectColorRedTransforms_CUDA;
     VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_CUDA;
+    VP8LBundleColorMap = BundleColorMap_CUDA;
 }
 
 #else  // !WEBP_USE_SSE2
