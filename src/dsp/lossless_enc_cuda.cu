@@ -23,6 +23,9 @@
 #include "src/dsp/lossless_common.h"
 
 
+static VP8LProcessEncBlueAndRedFunc VP8LSubtractGreenFromBlueAndRed_old;
+static VP8LCollectColorRedTransformsFunc VP8LCollectColorRedTransforms_old;
+
 #define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
 inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true) {
     if (code != cudaSuccess) {
@@ -32,8 +35,9 @@ inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=
     }
 }
 
-static double duration_to_double(std::chrono::duration<int64_t, std::nano> d) {
-    return std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1>>>(d).count();
+static double convert_duration(std::chrono::duration<int64_t, std::nano> d) {
+    typedef std::chrono::duration<double, std::milli> output_type;
+    return std::chrono::duration_cast<output_type>(d).count();
 }
 
 
@@ -67,8 +71,14 @@ static void SubtractGreenFromBlueAndRed_CUDA(uint32_t* argb_data,
     // Copy input arrays to the GPU using cudaMemcpy
     cudaCheckError(cudaMemcpy(result, argb_data, num_pixels * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
     SubtractGreenFromBlueAndRed_kernel<<<blocks, threadsPerBlock>>>(result, num_pixels);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    printf("SubtractGreenFromBlueAndRed: kernel execution time %.6f\n",
+       convert_duration(end - start));
 
     // Copy result from GPU using cudaMemcpy
     cudaCheckError(cudaMemcpy(argb_data, result, num_pixels * sizeof(uint32_t), cudaMemcpyDeviceToHost))
@@ -79,28 +89,53 @@ static void SubtractGreenFromBlueAndRed_CUDA(uint32_t* argb_data,
 static void SubtractGreenFromBlueAndRed_Wrapper(
         uint32_t* argb_data, int num_pixels) {
 
-    uint32_t *argb_data_copy = (uint32_t *) malloc(sizeof(*argb_data_copy) * num_pixels);
-    memcpy(argb_data_copy, argb_data, sizeof(*argb_data_copy) * num_pixels);
+    uint32_t *argb_data_temp = (uint32_t *) malloc(sizeof(*argb_data_temp) * num_pixels);
+    uint32_t *argb_data_res = (uint32_t *) malloc(sizeof(*argb_data_res) * num_pixels);
+
+    double duration_old;
+    {
+        memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
+        auto start = std::chrono::high_resolution_clock::now();
+
+        VP8LSubtractGreenFromBlueAndRed_old(argb_data_temp, num_pixels);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_old = convert_duration(end - start);
+        memcpy(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels);
+    }
 
     double duration_cuda;
     {
+        memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
         auto start = std::chrono::high_resolution_clock::now();
-        SubtractGreenFromBlueAndRed_CUDA(argb_data, num_pixels);
+
+        SubtractGreenFromBlueAndRed_CUDA(argb_data_temp, num_pixels);
+
         auto end = std::chrono::high_resolution_clock::now();
-        duration_cuda = duration_to_double(end - start);
+        duration_cuda = convert_duration(end - start);
+        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     double duration_c;
     {
+        memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
         auto start = std::chrono::high_resolution_clock::now();
-        VP8LSubtractGreenFromBlueAndRed_C(argb_data_copy, num_pixels);
+
+        VP8LSubtractGreenFromBlueAndRed_C(argb_data_temp, num_pixels);
+
         auto end = std::chrono::high_resolution_clock::now();
-        duration_c = duration_to_double(end - start);
+        duration_c = convert_duration(end - start);
+        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
-    printf("SubtractGreenFromBlueAndRed: duration_cuda = %f, duration_C = %f\n",
-        duration_cuda, duration_c);
-    free(argb_data_copy);
+    printf("SubtractGreenFromBlueAndRed: "
+        "duration_cuda = %.6f, duration_C = %.6f, duration_old = %.6f\n",
+        duration_cuda, duration_c, duration_old);
+
+    memcpy(argb_data, argb_data_res, sizeof(*argb_data) * num_pixels);
+
+    free(argb_data_temp);
+    free(argb_data_res);
 }
 
 //------------------------------------------------------------------------------
@@ -226,8 +261,14 @@ static void CollectColorRedTransforms_CUDA(const uint32_t* argb, int stride,
     cudaCheckError(cudaMemcpy(histo_result, histo, 256 * sizeof(int), cudaMemcpyHostToDevice));
     cudaCheckError(cudaMemcpy(argb_result, argb, argb_size * sizeof(uint32_t), cudaMemcpyHostToDevice));
 
+    auto start = std::chrono::high_resolution_clock::now();
+
     // Launch kernel to compute VP8LSubtractGreenFromBlueAndRed
     CollectColorRedTransforms_kernel<<<gridDim, blockDim>>>(argb_result, stride, tile_width, tile_height, green_to_red, histo_result);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    printf("CollectColorRedTransforms: kernel execution time %.6f\n",
+       convert_duration(end - start));
 
     // Copy result from GPU using cudaMemcpy
     cudaCheckError(cudaMemcpy(histo, histo_result, 256 * sizeof(int), cudaMemcpyDeviceToHost)); //only histo modified
@@ -237,6 +278,68 @@ static void CollectColorRedTransforms_CUDA(const uint32_t* argb, int stride,
 
 }
 
+static void CollectColorRedTransforms_Wrapper(
+        const uint32_t* argb, int stride,
+        int tile_width, int tile_height,
+        int green_to_red, int histo[]) {
+
+    int *histo_temp = (int *) malloc(sizeof(*histo_temp) * 256);
+    int *histo_res = (int *) malloc(sizeof(*histo_res) * 256);
+
+    double duration_old;
+    {
+        memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
+        auto start = std::chrono::high_resolution_clock::now();
+
+        VP8LCollectColorRedTransforms_old(argb, stride,
+            tile_width, tile_height, green_to_red, histo_temp);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_old = convert_duration(end - start);
+        memcpy(histo_res, histo_temp, sizeof(*histo_res) * 256);
+    }
+
+    double duration_cuda;
+    {
+        memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
+        auto start = std::chrono::high_resolution_clock::now();
+
+        CollectColorRedTransforms_CUDA(argb, stride,
+            tile_width, tile_height, green_to_red, histo_temp);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_cuda = convert_duration(end - start);
+        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
+    }
+
+    double duration_c;
+    {
+        memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
+        auto start = std::chrono::high_resolution_clock::now();
+
+        VP8LCollectColorRedTransforms_C(argb, stride,
+            tile_width, tile_height, green_to_red, histo_temp);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_c = convert_duration(end - start);
+        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
+    }
+
+    printf("CollectColorRedTransforms: "
+        "duration_cuda = %.6f, duration_C = %.6f, duration_old = %.6f\n",
+        duration_cuda, duration_c, duration_old);
+
+    memcpy(histo, histo_res, sizeof(*histo) * 256);
+
+    free(histo_temp);
+    free(histo_res);
+
+    // Reset to the old function after a while, because this is called a lot
+    static int count = 0;
+    if (count++ >= 8) {
+        VP8LCollectColorRedTransforms = VP8LCollectColorRedTransforms_old;
+    }
+}
 
 __global__ void CollectColorBlueTransforms_kernel(const uint32_t* argb, int stride,
                                                     int tile_width, int tile_height,
@@ -361,9 +464,14 @@ static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
 extern "C" void VP8LEncDspInitCUDA(void);
 
 WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitCUDA(void) {
+    VP8LSubtractGreenFromBlueAndRed_old = VP8LSubtractGreenFromBlueAndRed;
     VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_Wrapper;
+    printf("VP8LSubtractGreenFromBlueAndRed_old = %p\n", VP8LSubtractGreenFromBlueAndRed_old);
+
+    VP8LCollectColorRedTransforms_old = VP8LCollectColorRedTransforms;
+    VP8LCollectColorRedTransforms = CollectColorRedTransforms_Wrapper;
+
     //VP8LTransformColor = TransformColor_CUDA;
-    //VP8LCollectColorRedTransforms = CollectColorRedTransforms_CUDA;
     //VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_CUDA;
     //VP8LBundleColorMap = BundleColorMap_CUDA;
 }
