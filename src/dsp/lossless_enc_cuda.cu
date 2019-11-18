@@ -92,6 +92,14 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
     uint32_t *argb_data_temp = (uint32_t *) malloc(sizeof(*argb_data_temp) * num_pixels);
     uint32_t *argb_data_res = (uint32_t *) malloc(sizeof(*argb_data_res) * num_pixels);
 
+    // Warm cache, and get reference result
+    {
+        memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
+        VP8LSubtractGreenFromBlueAndRed_C(argb_data_temp, num_pixels);
+        memcpy(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels);
+    }
+
+    // Time original function
     double duration_old;
     {
         memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
@@ -101,9 +109,10 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_old = convert_duration(end - start);
-        memcpy(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels);
+        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
+    // Time CUDA function
     double duration_cuda;
     {
         memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
@@ -116,6 +125,7 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
         assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
+    // Time C function
     double duration_c;
     {
         memcpy(argb_data_temp, argb_data, sizeof(*argb_data_temp) * num_pixels);
@@ -243,7 +253,10 @@ __global__ void CollectColorRedTransforms_kernel(const uint32_t* argb, int strid
 static void CollectColorRedTransforms_CUDA(const uint32_t* argb, int stride,
                                      int tile_width, int tile_height,
                                      int green_to_red, int histo[]) {
-      // Dimensions
+
+    printf("tile_width = %d, tile_height = %d\n", tile_width, tile_height);
+
+    // Dimensions
     dim3 blockDim(16, 16);
     dim3 gridDim((tile_width  + blockDim.x - 1) / blockDim.x,
                  (tile_height + blockDim.y - 1) / blockDim.y);
@@ -286,6 +299,15 @@ static void CollectColorRedTransforms_Wrapper(
     int *histo_temp = (int *) malloc(sizeof(*histo_temp) * 256);
     int *histo_res = (int *) malloc(sizeof(*histo_res) * 256);
 
+    // Warm cache, and get reference result
+    {
+        memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
+        VP8LCollectColorRedTransforms_C(argb, stride,
+            tile_width, tile_height, green_to_red, histo_temp);
+        memcpy(histo_res, histo_temp, sizeof(*histo_res) * 256);
+    }
+
+    // Time old function
     double duration_old;
     {
         memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
@@ -296,9 +318,10 @@ static void CollectColorRedTransforms_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_old = convert_duration(end - start);
-        memcpy(histo_res, histo_temp, sizeof(*histo_res) * 256);
+        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
     }
 
+    // Time CUDA function
     double duration_cuda;
     {
         memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
@@ -312,6 +335,7 @@ static void CollectColorRedTransforms_Wrapper(
         assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
     }
 
+    // Time C function
     double duration_c;
     {
         memcpy(histo_temp, histo, sizeof(*histo_temp) * 256);
