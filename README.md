@@ -110,10 +110,10 @@ We chose to implement these functions since they were relatively straightforward
 We chose to focus on timing two representative functions. The `SubtractGreenFromBlueAndRed` function performs a transform across the entire image in one pass, so its runtime scales with the size of the image chosen. On the other hand, the `CollectColorRedTransforms` function operates only on a 32x32 block of the image, so its performance is more or less invariant to the image size. The `TransformColor` function is similar, though it operates only on a 1x32 block.
 
 
-| Original | Plain C | CUDA | CUDA kernel |
-| -------- | ------- | ---- | ----------- |
-| SubtractGreenFromBlueAndRed | Size 15000 x 11878 (starry_night) | 70 ms | 83 ms | 278 ms | 0.043 ms |
-| SubtractGreenFromBlueAndRed | Size 1277 x 1632 (Mitski) | 1.3 ms | 1.1ms | 121 ms | 0.032 ms |
+|    | Original | Plain C | CUDA | CUDA kernel |
+| -- | -------- | ------- | ---- | ----------- |
+| SubtractGreenFromBlueAndRed <br> _Size 15000 x 11878 (starry_night)_ | 70 ms | 83 ms | 278 ms | 0.043 ms |
+| SubtractGreenFromBlueAndRed <br> _Size 1277 x 1632 (Mitski)_ | 1.3 ms | 1.1ms | 121 ms | 0.032 ms |
 | TransformColor | 0.4 µs | 0.5 µs | 205 µs | 6.9 µs |
 | CollectColorRedTransforms | 2.0 µs | 2.5 µs | 230 µs | 8.2 µs |
 
@@ -195,7 +195,7 @@ Investigate initial viable opportunities to express parallelism in encoding pipe
 
 Decide on which aspect(s) of the pipeline we should study for parallelization.
 
-* Vp8l_enc.c: ApplySubtractGreen
+* `vp8l_enc.c`: `ApplySubtractGreen`
 * The rest of the transforms
 * Compare different CUDA implementations of the same transforms?
 * AnalyzeHistogram
@@ -218,35 +218,35 @@ Checkpoint Deadline
 
 #### Thursday, November 21, 2019
 
-Determining higher-level functions to parallel (both)
-Complete timing analysis on the sequential implementations, producing graphs/tables of speedup (Emma)
-Complete timing analysis on parallel implementations (Kevin)
+* Determining higher-level functions to parallel (both)
+* Complete timing analysis on the sequential implementations, producing graphs/tables of speedup (Emma)
+* Complete timing analysis on parallel implementations (Kevin)
 
 #### Monday, November 25, 2019
 
-Analyze higher-level function VP8LColorSpaceTransform and how much control flow it is possible to move into the GPU / decide on function boundaries (Kevin)
-Begin writing kernel for GetBestGreenToRed (Emma)
-Test implementation (both)
+* Analyze higher-level function `VP8LColorSpaceTransform` and how much control flow it is possible to move into the GPU / decide on function boundaries (Kevin)
+* Begin writing kernel for `GetBestGreenToRed` (Emma)
+* Test implementation (both)
 
 #### Thursday, November 28, 2019
 
-Begin writing kernel for GetBestGreenRedToBlue (Kevin)
-Instrument and collect performance timing data to compare GetBestGreenToRed and GetBestGreenRedToBlue functions (Emma)
-
+* Begin writing kernel for `GetBestGreenRedToBlue` (Kevin)
+* Instrument and collect performance timing data to compare `GetBestGreenToRed` and `GetBestGreenRedToBlue` functions (Emma)
+ 
 #### Monday, December 2, 2019
 
-Stretch goal: Analyze of feasibility of parallelizing AnalyzeEntropy (Kevin)
-Complete implementation of VP8LColorSpaceTransform (Emma)
+* Stretch goal: Analyze of feasibility of parallelizing `AnalyzeEntropy` (Kevin)
+* Complete implementation of `VP8LColorSpaceTransform` (Emma)
 
 #### Thursday, December 5, 2019
 
-Complete deliverable (both)
-Create performance tables (Kevin)
-Create performance graphs (Emma)
-Prepare for poster session and documentation (both)
+* Complete deliverable (both)
+* Create performance tables (Kevin)
+* Create performance graphs (Emma)
+* Prepare for poster session and documentation (both)
 
 #### Sunday, December 8, 2019
 
-Complete writing and submit the **final report** by midnight. (both)
+* Complete writing and submit the **final report** by midnight. (both)
 
 Final Deadline
