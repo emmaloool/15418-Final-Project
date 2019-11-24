@@ -714,8 +714,8 @@ static void CopyTileWithColorTransform(int xsize, int ysize,
   }
 }
 
-void VP8LColorSpaceTransform(int width, int height, int bits, int quality,
-                             uint32_t* const argb, uint32_t* image) {
+void VP8LColorSpaceTransform_C(int width, int height, int bits, int quality,
+                               uint32_t* const argb, uint32_t* image) {
   const int max_tile_size = 1 << bits;
   const int tile_xsize = VP8LSubSampleSize(width, bits);
   const int tile_ysize = VP8LSubSampleSize(height, bits);

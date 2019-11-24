@@ -865,6 +865,10 @@ GENERATE_PREDICTOR_SUB(Predictor13, PredictorSub13_C)
 
 //------------------------------------------------------------------------------
 
+// Added for CUDA
+extern VP8LColorSpaceTransformFunc VP8LColorSpaceTransform_C;
+VP8LColorSpaceTransformFunc VP8LColorSpaceTransform;
+
 VP8LProcessEncBlueAndRedFunc VP8LSubtractGreenFromBlueAndRed;
 
 VP8LTransformColorFunc VP8LTransformColor;
@@ -900,6 +904,9 @@ extern void VP8LEncDspInitMSA(void);
 
 WEBP_DSP_INIT_FUNC(VP8LEncDspInit) {
   VP8LDspInit();
+
+  // Added for CUDA
+  VP8LColorSpaceTransform = VP8LColorSpaceTransform_C;
 
 #if !WEBP_NEON_OMIT_C_CODE
   VP8LSubtractGreenFromBlueAndRed = VP8LSubtractGreenFromBlueAndRed_C;

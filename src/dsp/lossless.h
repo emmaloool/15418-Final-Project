@@ -117,6 +117,12 @@ void VP8LDspInit(void);
 //------------------------------------------------------------------------------
 // Encoding
 
+// Added to allow specialization with CUDA
+typedef void (*VP8LColorSpaceTransformFunc)(int width, int height, int bits,
+                                            int quality, uint32_t* const argb,
+                                            uint32_t* image);
+extern VP8LColorSpaceTransformFunc VP8LColorSpaceTransform;
+
 typedef void (*VP8LProcessEncBlueAndRedFunc)(uint32_t* dst, int num_pixels);
 extern VP8LProcessEncBlueAndRedFunc VP8LSubtractGreenFromBlueAndRed;
 typedef void (*VP8LTransformColorFunc)(const VP8LMultipliers* const m,
