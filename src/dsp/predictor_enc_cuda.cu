@@ -31,11 +31,6 @@ static WEBP_INLINE void MultipliersClear(VP8LMultipliers* const m) {
   m->red_to_blue_ = 0;
 }
 
-static WEBP_INLINE uint32_t VP8LSubSampleSize(uint32_t size,
-                                              uint32_t sampling_bits) {
-  return (size + (1 << sampling_bits) - 1) >> sampling_bits;
-}
-
 static WEBP_INLINE int GetMin(int a, int b) { return (a > b) ? b : a; }
 
 static WEBP_INLINE void ColorCodeToMultipliers(uint32_t color_code,
@@ -52,7 +47,6 @@ static WEBP_INLINE uint32_t MultipliersToColorCode(
          ((uint32_t)(m->green_to_blue_) << 8) |
          m->green_to_red_;
 }
-
 
 //------------------------------------------------------------------------------
 
@@ -269,7 +263,7 @@ static void CopyTileWithColorTransform(int xsize, int ysize,
 //------------------------------------------------------------------------------
 // ColorSpaceTransform
 
-void VP8LColorSpaceTransform_C(int width, int height, int bits, int quality,
+void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
                                uint32_t* const argb, uint32_t* image) {
   const int max_tile_size = 1 << bits;
   const int tile_xsize = VP8LSubSampleSize(width, bits);
@@ -325,4 +319,5 @@ void VP8LColorSpaceTransform_C(int width, int height, int bits, int quality,
     }
   }
 }
+#endif
 
