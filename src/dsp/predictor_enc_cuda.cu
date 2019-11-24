@@ -50,6 +50,173 @@ static WEBP_INLINE uint32_t MultipliersToColorCode(
 
 //------------------------------------------------------------------------------
 
+__device__ __inline__ float SlowSLog2_device(float x) {
+    return x * log2(x);
+}
+
+// Compute the combined Shanon's entropy for distribution {X} and {X+Y}
+__device__ __inline__ float CombinedShannonEntropy_device(const int X[256], const int Y[256]) {
+  int i;
+  double retval = 0.;
+  int sumX = 0, sumXY = 0;
+  for (i = 0; i < 256; ++i) {
+    const int x = X[i];
+    if (x != 0) {
+      const int xy = x + Y[i];
+      sumX += x;
+      retval -= SlowSLog2_device(x);
+      sumXY += xy;
+      retval -= SlowSLog2_device(xy);
+    } else if (Y[i] != 0) {
+      sumXY += Y[i];
+      retval -= SlowSLog2_device(Y[i]);
+    }
+  }
+  retval += SlowSLog2_device(sumX) + SlowSLog2_device(sumXY);
+  return (float)retval;
+}
+
+__device__ __inline__ float PredictionCostSpatial_device(const int counts[256], int weight_0,
+                                   double exp_val) {
+  const int significant_symbols = 256 >> 4;
+  const double exp_decay_factor = 0.6;
+  double bits = weight_0 * counts[0];
+  int i;
+  for (i = 1; i < significant_symbols; ++i) {
+    bits += exp_val * (counts[i] + counts[256 - i]);
+    exp_val *= exp_decay_factor;
+  }
+  return (float)(-0.1 * bits);
+}
+
+__device__ __inline__ float PredictionCostCrossColor_device(const int accumulated[256],
+                                      const int counts[256]) {
+  // Favor low entropy, locally and globally.
+  // Favor small absolute values for PredictionCostSpatial
+  static const double kExpValue = 2.4;
+  return CombinedShannonEntropy_device(counts, accumulated) +
+         PredictionCostSpatial_device(counts, 3, kExpValue);
+}
+
+//------------------------------------------------------------------------------
+// Red functions
+
+__device__ __inline__ int ColorTransformDelta(int8_t color_pred, int8_t color) {
+    return ((int)color_pred * color) >> 5;
+}
+
+__device__ __inline__  int8_t U32ToS8(uint32_t v) {
+    return (int8_t)(v & 0xff);
+}
+
+__device__ __inline__ uint8_t TransformColorRed(uint8_t green_to_red,
+                                                uint32_t argb) {
+    const int8_t green = U32ToS8(argb >> 8);
+    int new_red = argb >> 16;
+    new_red -= ColorTransformDelta(green_to_red, green);
+    return (new_red & 0xff);
+}
+
+__device__ __inline__ void CollectColorRedTransforms_device(
+                                 const uint32_t* argb, int stride,
+                                 int tile_width, int tile_height,
+                                 int green_to_red, int histo[]) {
+
+    // Overall index from position of thread in current block, and given the block we are in.
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+
+    if (x < tile_width && y < tile_height) {
+        int transform_index = TransformColorRed((uint8_t)green_to_red, argb[stride * y + x]);
+        atomicAdd(&histo[transform_index], 1);
+    }
+}
+
+__global__ void GetPredictionCostCrossColorRed_kernel(
+        const uint32_t* device_argb, int stride, int tile_width, int tile_height,
+        VP8LMultipliers prev_x, VP8LMultipliers prev_y, int kMaxIters,
+        const int device_accumulated_red_histo[256],
+        float *device_diff_results) {
+
+    const int green_to_red_offset = -(1 << kMaxIters) + 1;
+    const int green_to_red_multiplier = 64 >> kMaxIters;
+
+    const int results_index = blockIdx.z;
+    const int green_to_red = green_to_red_multiplier * (results_index + green_to_red_offset);
+
+    const int ind = threadIdx.y * tile_width + threadIdx.x;
+    __shared__ int histo[256];
+    if (ind < 256) {
+        histo[ind] = 0;
+    }
+    __syncthreads();
+
+    CollectColorRedTransforms_device(device_argb, stride, tile_width, tile_height,
+                                green_to_red, histo);
+
+    float cur_diff = PredictionCostCrossColor_device(device_accumulated_red_histo, histo);
+    if ((uint8_t)green_to_red == prev_x.green_to_red_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if ((uint8_t)green_to_red == prev_y.green_to_red_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if (green_to_red == 0) {
+        cur_diff -= 3;
+    }
+
+    device_diff_results[results_index] = cur_diff;
+}
+
+static void GetBestGreenToRed(
+        const uint32_t* device_argb, int stride, int tile_width, int tile_height,
+        VP8LMultipliers prev_x, VP8LMultipliers prev_y, int quality,
+        const int device_accumulated_red_histo[256], VP8LMultipliers* const best_tx) {
+    const int kMaxIters = 4 + ((7 * quality) >> 8);  // in range [4..6]
+
+    // If kMaxIters is 6, then the largest possible deviation is 2^7 - 1 = 127.
+    // Then the offset value for green_to_red will be 1 - 2^6 = -63.
+    const int num_results = (2 << kMaxIters) - 1;
+    const int green_to_red_offset = -(1 << kMaxIters) + 1;
+    const int green_to_red_multiplier = 64 >> kMaxIters;
+
+    // Allocate array for cur_diff results
+    float *device_diff_results;
+    cudaMalloc(&device_diff_results, num_results * sizeof(*device_diff_results)); 
+
+    assert(tile_width <= 32);
+    assert(tile_height <= 32);
+
+    dim3 blockDim(32, 32, 1);
+    dim3 gridDim(1, 1, num_results);
+
+    GetPredictionCostCrossColorRed_kernel<<<gridDim, blockDim>>>(
+                          device_argb, stride, tile_width, tile_height, prev_x, prev_y,
+                          kMaxIters,
+                          device_accumulated_red_histo, device_diff_results);
+
+    float diff_results[num_results];
+    cudaMemcpy(diff_results, device_diff_results, num_results * sizeof(*diff_results), cudaMemcpyDeviceToHost);
+
+    int green_to_red_best = 0;
+    float best_diff = INFINITY;
+    for (int i = 0; i < num_results; ++i) {
+        float cur_diff = diff_results[i];
+        int green_to_red_cur = green_to_red_multiplier * (i + green_to_red_offset);
+        if (cur_diff < best_diff) {
+            best_diff = cur_diff;
+            green_to_red_best = green_to_red_cur;
+        }
+    }
+
+    best_tx->green_to_red_ = (green_to_red_best & 0xff);
+    cudaFree(device_diff_results);
+}
+
+
+//------------------------------------------------------------------------------
+// Blue functions
+
 static float PredictionCostSpatial(const int counts[256], int weight_0,
                                    double exp_val) {
   const int significant_symbols = 256 >> 4;
@@ -71,66 +238,6 @@ static float PredictionCostCrossColor(const int accumulated[256],
   return VP8LCombinedShannonEntropy(counts, accumulated) +
          PredictionCostSpatial(counts, 3, kExpValue);
 }
-
-//------------------------------------------------------------------------------
-// Red functions
-
-static float GetPredictionCostCrossColorRed(
-    const uint32_t* argb, int stride, int tile_width, int tile_height,
-    VP8LMultipliers prev_x, VP8LMultipliers prev_y, int green_to_red,
-    const int accumulated_red_histo[256]) {
-  int histo[256] = { 0 };
-  float cur_diff;
-
-  VP8LCollectColorRedTransforms(argb, stride, tile_width, tile_height,
-                                green_to_red, histo);
-
-  cur_diff = PredictionCostCrossColor(accumulated_red_histo, histo);
-  if ((uint8_t)green_to_red == prev_x.green_to_red_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if ((uint8_t)green_to_red == prev_y.green_to_red_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if (green_to_red == 0) {
-    cur_diff -= 3;
-  }
-  return cur_diff;
-}
-
-static void GetBestGreenToRed(
-        const uint32_t* argb, int stride, int tile_width, int tile_height,
-        VP8LMultipliers prev_x, VP8LMultipliers prev_y, int quality,
-        const int accumulated_red_histo[256], VP8LMultipliers* const best_tx) {
-    const int kMaxIters = 4 + ((7 * quality) >> 8);  // in range [4..6]
-    int green_to_red_best = 0;
-    int iter, offset;
-    float best_diff = GetPredictionCostCrossColorRed(
-                          argb, stride, tile_width, tile_height, prev_x, prev_y,
-                          green_to_red_best, accumulated_red_histo);
-    for (iter = 0; iter < kMaxIters; ++iter) {
-        // ColorTransformDelta is a 3.5 bit fixed point, so 32 is equal to
-        // one in color computation. Having initial delta here as 1 is sufficient
-        // to explore the range of (-2, 2).
-        const int delta = 32 >> iter;
-        // Try a negative and a positive delta from the best known value.
-        for (offset = -delta; offset <= delta; offset += 2 * delta) {
-            const int green_to_red_cur = offset + green_to_red_best;
-            const float cur_diff = GetPredictionCostCrossColorRed(
-            argb, stride, tile_width, tile_height, prev_x, prev_y,
-            green_to_red_cur, accumulated_red_histo);
-            if (cur_diff < best_diff) {
-                best_diff = cur_diff;
-                green_to_red_best = green_to_red_cur;
-            }
-        }
-    }
-    best_tx->green_to_red_ = (green_to_red_best & 0xff);
-}
-
-
-//------------------------------------------------------------------------------
-// Blue functions
 
 static float GetPredictionCostCrossColorBlue(
     const uint32_t* argb, int stride, int tile_width, int tile_height,
@@ -221,9 +328,10 @@ static VP8LMultipliers GetBestColorTransformForTile(int tile_x, int tile_y, int 
                                                     VP8LMultipliers prev_x,
                                                     VP8LMultipliers prev_y,
                                                     int quality, int xsize, int ysize,
-                                                    const int accumulated_red_histo[256],
+                                                    const int device_accumulated_red_histo[256],
                                                     const int accumulated_blue_histo[256],
-                                                    const uint32_t* const argb) {
+                                                    const uint32_t* const argb,
+                                                    const uint32_t* const device_argb) {
 
     const int max_tile_size = 1 << bits;
     const int tile_y_offset = tile_y * max_tile_size;
@@ -233,11 +341,12 @@ static VP8LMultipliers GetBestColorTransformForTile(int tile_x, int tile_y, int 
     const int tile_width = all_x_max - tile_x_offset;
     const int tile_height = all_y_max - tile_y_offset;
     const uint32_t* const tile_argb = argb + tile_y_offset * xsize + tile_x_offset;
+    const uint32_t* const device_tile_argb = device_argb + tile_y_offset * xsize + tile_x_offset;
     VP8LMultipliers best_tx;
     MultipliersClear(&best_tx);
 
-    GetBestGreenToRed(tile_argb, xsize, tile_width, tile_height,
-                    prev_x, prev_y, quality, accumulated_red_histo, &best_tx);
+    GetBestGreenToRed(device_tile_argb, xsize, tile_width, tile_height,
+                    prev_x, prev_y, quality, device_accumulated_red_histo, &best_tx);
     GetBestGreenRedToBlue(tile_argb, xsize, tile_width, tile_height,
                         prev_x, prev_y, quality, accumulated_blue_histo,
                         &best_tx);
@@ -265,6 +374,15 @@ static void CopyTileWithColorTransform(int xsize, int ysize,
 
 void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
                                uint32_t* const argb, uint32_t* image) {
+
+    uint32_t *device_argb;
+    cudaMalloc(&device_argb, width * height * sizeof(uint32_t));
+    cudaMemcpy(device_argb, argb, width * height * sizeof(uint32_t), cudaMemcpyHostToDevice); //only histo modified
+
+    int *device_accumulated_red_histo;
+    cudaMalloc(&device_accumulated_red_histo, 256 * sizeof(*device_accumulated_red_histo));
+    cudaMemset(device_accumulated_red_histo, 0, 256 * sizeof(*device_accumulated_red_histo));
+
   const int max_tile_size = 1 << bits;
   const int tile_xsize = VP8LSubSampleSize(width, bits);
   const int tile_ysize = VP8LSubSampleSize(height, bits);
@@ -285,12 +403,16 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
       if (tile_y != 0) {
         ColorCodeToMultipliers(image[offset - tile_xsize], &prev_y);
       }
+
+      // Note that device_accumulated_red_histo is passed as const.
+      // So it won't be changed by this function call
+
       prev_x = GetBestColorTransformForTile(tile_x, tile_y, bits,
                                             prev_x, prev_y,
                                             quality, width, height,
-                                            accumulated_red_histo,
+                                            device_accumulated_red_histo,
                                             accumulated_blue_histo,
-                                            argb);
+                                            argb, device_argb);
       image[offset] = MultipliersToColorCode(&prev_x);
       CopyTileWithColorTransform(width, height, tile_x_offset, tile_y_offset,
                                  max_tile_size, prev_x, argb);
@@ -316,8 +438,14 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
           ++accumulated_blue_histo[(pix >> 0) & 0xff];
         }
       }
+
+      cudaMemcpy(device_accumulated_red_histo, accumulated_red_histo,
+            256 * sizeof(int), cudaMemcpyHostToDevice);
     }
   }
+
+  cudaFree(device_argb);
+  cudaFree(device_accumulated_red_histo);
 }
 #endif
 
