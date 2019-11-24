@@ -866,7 +866,8 @@ GENERATE_PREDICTOR_SUB(Predictor13, PredictorSub13_C)
 //------------------------------------------------------------------------------
 
 // Added for CUDA
-extern VP8LColorSpaceTransformFunc VP8LColorSpaceTransform_C;
+void VP8LColorSpaceTransform_C(int width, int height, int bits, int quality,
+                               uint32_t* const argb, uint32_t* image);
 VP8LColorSpaceTransformFunc VP8LColorSpaceTransform;
 
 VP8LProcessEncBlueAndRedFunc VP8LSubtractGreenFromBlueAndRed;
