@@ -448,10 +448,9 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
 
             cudaCheckError(cudaMemcpy(device_accumulated_red_histo, accumulated_red_histo, 
                                 256 * sizeof(int), cudaMemcpyHostToDevice));
-            // todo: make faster
-            cudaCheckError(cudaMemcpy(device_argb, argb, width * height * sizeof(uint32_t), cudaMemcpyHostToDevice));
         }
     }
+
 
     cudaCheckError(cudaFree(device_argb));
     cudaCheckError(cudaFree(device_accumulated_red_histo));
