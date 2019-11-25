@@ -23,6 +23,17 @@
 #include "src/dsp/lossless_common.h"
 #include "src/enc/vp8li_enc.h"
 
+extern "C" {
+
+#define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
+inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true) {
+    if (code != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s at %s:%d\n",
+            cudaGetErrorString(code), file, line);
+        if (abort) exit(code);
+    }
+}
+
 //------------------------------------------------------------------------------
 
 static WEBP_INLINE void MultipliersClear(VP8LMultipliers* const m) {
@@ -182,7 +193,7 @@ static void GetBestGreenToRed(
 
     // Allocate array for cur_diff results
     float *device_diff_results;
-    cudaMalloc(&device_diff_results, num_results * sizeof(*device_diff_results)); 
+    cudaCheckError(cudaMalloc(&device_diff_results, num_results * sizeof(*device_diff_results))); 
 
     assert(tile_width <= 32);
     assert(tile_height <= 32);
@@ -196,7 +207,7 @@ static void GetBestGreenToRed(
                           device_accumulated_red_histo, device_diff_results);
 
     float diff_results[num_results];
-    cudaMemcpy(diff_results, device_diff_results, num_results * sizeof(*diff_results), cudaMemcpyDeviceToHost);
+    cudaCheckError(cudaMemcpy(diff_results, device_diff_results, num_results * sizeof(*diff_results), cudaMemcpyDeviceToHost));
 
     int green_to_red_best = 0;
     float best_diff = INFINITY;
@@ -210,7 +221,7 @@ static void GetBestGreenToRed(
     }
 
     best_tx->green_to_red_ = (green_to_red_best & 0xff);
-    cudaFree(device_diff_results);
+    cudaCheckError(cudaFree(device_diff_results));
 }
 
 
@@ -376,76 +387,77 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
                                uint32_t* const argb, uint32_t* image) {
 
     uint32_t *device_argb;
-    cudaMalloc(&device_argb, width * height * sizeof(uint32_t));
-    cudaMemcpy(device_argb, argb, width * height * sizeof(uint32_t), cudaMemcpyHostToDevice); //only histo modified
+    cudaCheckError(cudaMalloc(&device_argb, width * height * sizeof(uint32_t)));
+    cudaCheckError(cudaMemcpy(device_argb, argb, width * height * sizeof(uint32_t), cudaMemcpyHostToDevice)); //only histo modified
 
     int *device_accumulated_red_histo;
-    cudaMalloc(&device_accumulated_red_histo, 256 * sizeof(*device_accumulated_red_histo));
-    cudaMemset(device_accumulated_red_histo, 0, 256 * sizeof(*device_accumulated_red_histo));
+    cudaCheckError(cudaMalloc(&device_accumulated_red_histo, 256 * sizeof(*device_accumulated_red_histo)));
+    cudaCheckError(cudaMemset(device_accumulated_red_histo, 0, 256 * sizeof(*device_accumulated_red_histo)));
 
-  const int max_tile_size = 1 << bits;
-  const int tile_xsize = VP8LSubSampleSize(width, bits);
-  const int tile_ysize = VP8LSubSampleSize(height, bits);
-  int accumulated_red_histo[256] = { 0 };
-  int accumulated_blue_histo[256] = { 0 };
-  int tile_x, tile_y;
-  VP8LMultipliers prev_x, prev_y;
-  MultipliersClear(&prev_y);
-  MultipliersClear(&prev_x);
-  for (tile_y = 0; tile_y < tile_ysize; ++tile_y) {
-    for (tile_x = 0; tile_x < tile_xsize; ++tile_x) {
-      int y;
-      const int tile_x_offset = tile_x * max_tile_size;
-      const int tile_y_offset = tile_y * max_tile_size;
-      const int all_x_max = GetMin(tile_x_offset + max_tile_size, width);
-      const int all_y_max = GetMin(tile_y_offset + max_tile_size, height);
-      const int offset = tile_y * tile_xsize + tile_x;
-      if (tile_y != 0) {
-        ColorCodeToMultipliers(image[offset - tile_xsize], &prev_y);
-      }
+    const int max_tile_size = 1 << bits;
+    const int tile_xsize = VP8LSubSampleSize(width, bits);
+    const int tile_ysize = VP8LSubSampleSize(height, bits);
+    int accumulated_red_histo[256] = { 0 };
+    int accumulated_blue_histo[256] = { 0 };
+    int tile_x, tile_y;
+    VP8LMultipliers prev_x, prev_y;
+    MultipliersClear(&prev_y);
+    MultipliersClear(&prev_x);
+    for (tile_y = 0; tile_y < tile_ysize; ++tile_y) {
+        for (tile_x = 0; tile_x < tile_xsize; ++tile_x) {
+            int y;
+            const int tile_x_offset = tile_x * max_tile_size;
+            const int tile_y_offset = tile_y * max_tile_size;
+            const int all_x_max = GetMin(tile_x_offset + max_tile_size, width);
+            const int all_y_max = GetMin(tile_y_offset + max_tile_size, height);
+            const int offset = tile_y * tile_xsize + tile_x;
+            if (tile_y != 0) {
+                ColorCodeToMultipliers(image[offset - tile_xsize], &prev_y);
+            }
 
-      // Note that device_accumulated_red_histo is passed as const.
-      // So it won't be changed by this function call
+            // Note that device_accumulated_red_histo is passed as const.
+            // So it won't be changed by this function call
 
-      prev_x = GetBestColorTransformForTile(tile_x, tile_y, bits,
-                                            prev_x, prev_y,
-                                            quality, width, height,
-                                            device_accumulated_red_histo,
-                                            accumulated_blue_histo,
-                                            argb, device_argb);
-      image[offset] = MultipliersToColorCode(&prev_x);
-      CopyTileWithColorTransform(width, height, tile_x_offset, tile_y_offset,
-                                 max_tile_size, prev_x, argb);
+            prev_x = GetBestColorTransformForTile(tile_x, tile_y, bits,
+                                                prev_x, prev_y,
+                                                quality, width, height,
+                                                device_accumulated_red_histo,
+                                                accumulated_blue_histo,
+                                                argb, device_argb);
+            image[offset] = MultipliersToColorCode(&prev_x);
+            CopyTileWithColorTransform(width, height, tile_x_offset, tile_y_offset,
+                                     max_tile_size, prev_x, argb);
 
-      // Gather accumulated histogram data.
-      for (y = tile_y_offset; y < all_y_max; ++y) {
-        int ix = y * width + tile_x_offset;
-        const int ix_end = ix + all_x_max - tile_x_offset;
-        for (; ix < ix_end; ++ix) {
-          const uint32_t pix = argb[ix];
-          if (ix >= 2 &&
-              pix == argb[ix - 2] &&
-              pix == argb[ix - 1]) {
-            continue;  // repeated pixels are handled by backward references
-          }
-          if (ix >= width + 2 &&
-              argb[ix - 2] == argb[ix - width - 2] &&
-              argb[ix - 1] == argb[ix - width - 1] &&
-              pix == argb[ix - width]) {
-            continue;  // repeated pixels are handled by backward references
-          }
-          ++accumulated_red_histo[(pix >> 16) & 0xff];
-          ++accumulated_blue_histo[(pix >> 0) & 0xff];
+            // Gather accumulated histogram data.
+            for (y = tile_y_offset; y < all_y_max; ++y) {
+                int ix = y * width + tile_x_offset;
+                const int ix_end = ix + all_x_max - tile_x_offset;
+                for (; ix < ix_end; ++ix) {
+                    const uint32_t pix = argb[ix];
+                    if (ix >= 2 && pix == argb[ix - 2] && pix == argb[ix - 1]) {
+                        continue;  // repeated pixels are handled by backward references
+                    }
+                    if (ix >= width + 2 && argb[ix - 2] == argb[ix - width - 2] &&
+                        argb[ix - 1] == argb[ix - width - 1] && pix == argb[ix - width]) {
+                        continue;  // repeated pixels are handled by backward references
+                    }
+                    ++accumulated_red_histo[(pix >> 16) & 0xff];
+                    ++accumulated_blue_histo[(pix >> 0) & 0xff];
+                }
+            }
+
+            cudaCheckError(cudaMemcpy(device_accumulated_red_histo, accumulated_red_histo, 
+                                256 * sizeof(int), cudaMemcpyHostToDevice));
+            // todo: make faster
+            cudaCheckError(cudaMemcpy(device_argb, argb, width * height * sizeof(uint32_t), cudaMemcpyHostToDevice));
         }
-      }
-
-      cudaMemcpy(device_accumulated_red_histo, accumulated_red_histo,
-            256 * sizeof(int), cudaMemcpyHostToDevice);
     }
-  }
 
-  cudaFree(device_argb);
-  cudaFree(device_accumulated_red_histo);
+    cudaCheckError(cudaFree(device_argb));
+    cudaCheckError(cudaFree(device_accumulated_red_histo));
 }
-#endif
+
+} // extern "C"
+
+#endif // WEBP_USE_CUDA
 

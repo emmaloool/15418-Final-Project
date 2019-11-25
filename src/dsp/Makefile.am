@@ -155,8 +155,8 @@ libwebpdsp_mips_dsp_r2_la_LIBADD = libwebpdspdecode_mips_dsp_r2.la
 
 # ADDED
 libwebpdsp_cuda_la_SOURCES =
-libwebpdsp_cuda_la_SOURCES += lossless_enc_cuda.cu
 libwebpdsp_cuda_la_SOURCES += predictor_enc_cuda.cu
+libwebpdsp_cuda_la_SOURCES += lossless_enc_cuda.cu
 libwebpdsp_cuda_la_CPPFLAGS =
 libwebpdsp_cuda_la_CFLAGS = -m64
 libwebpdsp_cuda_la_LIBADD =

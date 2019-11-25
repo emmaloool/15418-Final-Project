@@ -581,21 +581,99 @@ static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
 }
 
 
+extern "C" void VP8LColorSpaceTransform_C(int width, int height, int bits, int quality,
+                               uint32_t* const argb, uint32_t* image);
+extern "C" void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
+                               uint32_t* const argb, uint32_t* image);
+
+extern "C" static void VP8LColorSpaceTransform_Wrapper(
+        int width, int height, int bits, int quality,
+        uint32_t* const argb, uint32_t* image) {
+
+    const int transform_width = VP8LSubSampleSize(width, bits);
+    const int transform_height = VP8LSubSampleSize(height, bits);
+
+    uint32_t *argb_temp = new uint32_t[width * height];
+    uint32_t *argb_res = new uint32_t[width * height];
+
+    uint32_t *image_temp = new uint32_t[transform_width * transform_height];
+    uint32_t *image_res = new uint32_t[transform_width * transform_height];
+
+    // Warm cache, and get reference result
+    {
+        memcpy(argb_temp, argb, width * height * sizeof(*argb_temp));
+        memcpy(image_temp, image, transform_width * transform_height * sizeof(*image_temp));
+
+        VP8LColorSpaceTransform_C(width, height, bits, quality, argb_temp, image_temp);
+
+        memcpy(argb_res, argb_temp, width * height * sizeof(*argb_res));
+        memcpy(image_res, image_temp, transform_width * transform_height * sizeof(*image_res));
+    }
+
+    // Time CUDA function
+    double duration_cuda;
+    {
+        memcpy(argb_temp, argb, width * height * sizeof(*argb_temp));
+        memcpy(image_temp, image, transform_width * transform_height * sizeof(*image_temp));
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        VP8LColorSpaceTransform_CUDA(width, height, bits, quality, argb_temp, image_temp);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_cuda = convert_duration(end - start);
+
+        assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
+        assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
+    }
+
+    // Time C function
+    double duration_c;
+    {
+        memcpy(argb_temp, argb, width * height * sizeof(*argb_temp));
+        memcpy(image_temp, image, transform_width * transform_height * sizeof(*image_temp));
+
+        auto start = std::chrono::high_resolution_clock::now();
+
+        VP8LColorSpaceTransform_C(width, height, bits, quality, argb_temp, image_temp);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        duration_c = convert_duration(end - start);
+
+        assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
+        assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
+    }
+
+    printf("VP8LColorSpaceTransform: "
+        "duration_cuda = %.6f, duration_C = %.6f\n",
+        duration_cuda, duration_c);
+
+    memcpy(argb, argb_res, width * height * sizeof(*argb));
+    memcpy(image, image_res, transform_width * transform_height * sizeof(*image));
+
+    delete[] argb_temp;
+    delete[] argb_res;
+    delete[] image_temp;
+    delete[] image_res;
+}
+
 //------------------------------------------------------------------------------
 // Entry point
 
 extern "C" void VP8LEncDspInitCUDA(void);
 
 WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitCUDA(void) {
-    VP8LSubtractGreenFromBlueAndRed_old = VP8LSubtractGreenFromBlueAndRed;
-    VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_Wrapper;
-    printf("VP8LSubtractGreenFromBlueAndRed_old = %p\n", VP8LSubtractGreenFromBlueAndRed_old);
+    VP8LColorSpaceTransform = VP8LColorSpaceTransform_Wrapper;
 
-    VP8LTransformColor_old = VP8LTransformColor;
-    VP8LTransformColor = TransformColor_Wrapper;
+    //VP8LSubtractGreenFromBlueAndRed_old = VP8LSubtractGreenFromBlueAndRed;
+    //VP8LSubtractGreenFromBlueAndRed = SubtractGreenFromBlueAndRed_Wrapper;
+    //printf("VP8LSubtractGreenFromBlueAndRed_old = %p\n", VP8LSubtractGreenFromBlueAndRed_old);
 
-    VP8LCollectColorRedTransforms_old = VP8LCollectColorRedTransforms;
-    VP8LCollectColorRedTransforms = CollectColorRedTransforms_Wrapper;
+    //VP8LTransformColor_old = VP8LTransformColor;
+    //VP8LTransformColor = TransformColor_Wrapper;
+
+    //VP8LCollectColorRedTransforms_old = VP8LCollectColorRedTransforms;
+    //VP8LCollectColorRedTransforms = CollectColorRedTransforms_Wrapper;
 
     //VP8LTransformColor = TransformColor_CUDA;
     //VP8LCollectColorBlueTransforms = CollectColorBlueTransforms_CUDA;
