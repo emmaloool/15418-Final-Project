@@ -149,7 +149,6 @@ __device__ __inline__ void CollectColorRedTransforms_device(
         int transform_index = TransformColorRed_device(
             (uint8_t)green_to_red, argb[stride * y + x]);
         atomicAdd(&histo[transform_index], 1);
-        //histo[transform_index]++;
     }
 }
 
@@ -527,11 +526,13 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
     // Perform kernel launch
     dim3 blockDim(max_tile_size, max_tile_size);
     dim3 gridDim(tile_xsize, tile_ysize);
+
     ColorSpaceTransform_kernel<<<gridDim, blockDim>>>(
         width, height, bits, quality,
         device_argb, device_image,
         device_accumulated_red_histo, device_accumulated_blue_histo);
 
+    cudaCheckError(cudaPeekAtLastError());
     cudaCheckError(cudaMemcpy(argb, device_argb, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost));
     cudaCheckError(cudaMemcpy(image, device_image, tile_xsize * tile_ysize * sizeof(uint32_t), cudaMemcpyDeviceToHost));
 
