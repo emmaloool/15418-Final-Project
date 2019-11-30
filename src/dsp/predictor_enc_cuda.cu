@@ -487,8 +487,9 @@ __global__ void ColorSpaceTransform_kernel(
                 // repeated pixels are handled by backward references
             ;
         if (!skip) {
-            ++accumulated_red_histo[(pix >> 16) & 0xff];
-            ++accumulated_blue_histo[(pix >> 0) & 0xff];
+            // TODO: this is disabled due to nondeterminism
+            //++accumulated_red_histo[(pix >> 16) & 0xff];
+            //++accumulated_blue_histo[(pix >> 0) & 0xff];
         }
     }
 }
