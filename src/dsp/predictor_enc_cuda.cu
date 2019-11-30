@@ -462,11 +462,15 @@ __global__ void ColorSpaceTransform_kernel(
             accumulated_blue_histo,
             argb);
 
-    image[offset] = MultipliersToColorCode(&prev_x);
+    // These need to only be performed by one thread
+    // TODO: parallelize this
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        image[offset] = MultipliersToColorCode(&prev_x);
 
-    CopyTileWithColorTransform_device(
-            width, height, tile_x_offset, tile_y_offset,
-            max_tile_size, prev_x, argb);
+        CopyTileWithColorTransform_device(
+                width, height, tile_x_offset, tile_y_offset,
+                max_tile_size, prev_x, argb);
+    }
 
     // Gather accumulated histogram data.
     int y = tile_y_offset + threadIdx.y;
@@ -528,22 +532,14 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
         device_argb, device_image,
         device_accumulated_red_histo, device_accumulated_blue_histo);
 
+    cudaCheckError(cudaMemcpy(argb, device_argb, width * height * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+    cudaCheckError(cudaMemcpy(image, device_image, tile_xsize * tile_ysize * sizeof(uint32_t), cudaMemcpyDeviceToHost));
+
     cudaCheckError(cudaFree(device_argb));
     cudaCheckError(cudaFree(device_image));
     cudaCheckError(cudaFree(device_accumulated_red_histo));
     cudaCheckError(cudaFree(device_accumulated_blue_histo));
 }
-
-
-
-
-
-
-
-
-
-
-
 
 
 
