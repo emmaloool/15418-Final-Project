@@ -27,6 +27,14 @@ static VP8LProcessEncBlueAndRedFunc VP8LSubtractGreenFromBlueAndRed_old;
 static VP8LTransformColorFunc VP8LTransformColor_old;
 static VP8LCollectColorRedTransformsFunc VP8LCollectColorRedTransforms_old;
 
+#define my_assert(ans) my_assert_helper((ans), __FILE__, __LINE__);
+static void my_assert_helper(int code, const char *file, int line) {
+    if (code != 0) {
+        fprintf(stderr, "my_assert failure: %s:%d\n", file, line);
+        exit(code);
+    }
+}
+
 
 #define cudaCheckError(ans) cudaAssert((ans), __FILE__, __LINE__);
 inline void cudaAssert(cudaError_t code, const char *file, int line, bool abort=true) {
@@ -111,7 +119,7 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_old = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     // Time CUDA function
@@ -124,7 +132,7 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_cuda = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     // Time C function
@@ -137,7 +145,7 @@ static void SubtractGreenFromBlueAndRed_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_c = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     printf("SubtractGreenFromBlueAndRed: "
@@ -249,7 +257,7 @@ static void TransformColor_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_old = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     // Time CUDA function
@@ -262,7 +270,7 @@ static void TransformColor_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_cuda = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     // Time C function
@@ -275,7 +283,7 @@ static void TransformColor_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_c = convert_duration(end - start);
-        assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
+        my_assert(0 == memcmp(argb_data_res, argb_data_temp, sizeof(*argb_data_res) * num_pixels));
     }
 
     printf("TransformColor: "
@@ -423,7 +431,7 @@ static void CollectColorRedTransforms_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_old = convert_duration(end - start);
-        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
+        my_assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
     }
 
     // Time CUDA function
@@ -437,7 +445,7 @@ static void CollectColorRedTransforms_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_cuda = convert_duration(end - start);
-        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
+        my_assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
     }
 
     // Time C function
@@ -451,7 +459,7 @@ static void CollectColorRedTransforms_Wrapper(
 
         auto end = std::chrono::high_resolution_clock::now();
         duration_c = convert_duration(end - start);
-        assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
+        my_assert(0 == memcmp(histo_res, histo_temp, sizeof(*histo_res) * 256));
     }
 
     printf("CollectColorRedTransforms: "
@@ -623,8 +631,8 @@ extern "C" static void VP8LColorSpaceTransform_Wrapper(
         auto end = std::chrono::high_resolution_clock::now();
         duration_cuda = convert_duration(end - start);
 
-        assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
-        assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
+        my_assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
+        my_assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
     }
 
     // Time C function
@@ -640,8 +648,8 @@ extern "C" static void VP8LColorSpaceTransform_Wrapper(
         auto end = std::chrono::high_resolution_clock::now();
         duration_c = convert_duration(end - start);
 
-        assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
-        assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
+        my_assert(0 == memcmp(argb_res, argb_temp, width * height * sizeof(*argb_res)));
+        my_assert(0 == memcmp(image_res, image_temp, transform_width * transform_height * sizeof(*image_res)));
     }
 
     printf("VP8LColorSpaceTransform: "
