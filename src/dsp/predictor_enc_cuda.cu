@@ -150,6 +150,7 @@ __device__ __inline__ void CollectColorRedTransforms_device(
             (uint8_t)green_to_red, argb[stride * y + x]);
         atomicAdd(&histo[transform_index], 1);
     }
+    __syncthreads();
 }
 
 
@@ -171,17 +172,22 @@ static float GetPredictionCostCrossColorRed_device(
         argb, stride, tile_width, tile_height,
         green_to_red, histo);
 
+    __shared__ float cur_diff;
+
     // TODO: this work is currently duplicated by all threads
-    float cur_diff = PredictionCostCrossColor_device(accumulated_red_histo, histo);
-    if ((uint8_t)green_to_red == prev_x.green_to_red_) {
-        cur_diff -= 3;  // favor keeping the areas locally similar
+    if (ind == 0) {
+        cur_diff = PredictionCostCrossColor_device(accumulated_red_histo, histo);
+        if ((uint8_t)green_to_red == prev_x.green_to_red_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if ((uint8_t)green_to_red == prev_y.green_to_red_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if (green_to_red == 0) {
+            cur_diff -= 3;
+        }
     }
-    if ((uint8_t)green_to_red == prev_y.green_to_red_) {
-        cur_diff -= 3;  // favor keeping the areas locally similar
-    }
-    if (green_to_red == 0) {
-        cur_diff -= 3;
-    }
+    __syncthreads();
 
     return cur_diff;
 }
@@ -217,7 +223,11 @@ static void GetBestGreenToRed_device(
             }
         }
     }
-    best_tx->green_to_red_ = (green_to_red_best & 0xff);
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        best_tx->green_to_red_ = (green_to_red_best & 0xff);
+    }
+    __syncthreads();
 }
 
 
@@ -249,6 +259,7 @@ __device__ __inline__ void CollectColorBlueTransforms_device(
             argb[stride * y + x]);
         atomicAdd(&histo[transform_index], 1);
     }
+    __syncthreads();
 }
 
 __device__
@@ -264,34 +275,38 @@ static float GetPredictionCostCrossColorBlue_device(
     }
     __syncthreads();
 
-  float cur_diff;
+    // NOTE: this work is parallelized over threads
+    CollectColorBlueTransforms_device(
+        argb, stride, tile_width, tile_height,
+        green_to_blue, red_to_blue, histo);
 
-  // NOTE: this work is parallelized over threads
-  CollectColorBlueTransforms_device(
-      argb, stride, tile_width, tile_height,
-      green_to_blue, red_to_blue, histo);
+    __shared__ float cur_diff;
 
-  // TODO: this work is currently duplicated by all threads
-  cur_diff = PredictionCostCrossColor_device(accumulated_blue_histo, histo);
-  if ((uint8_t)green_to_blue == prev_x.green_to_blue_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if ((uint8_t)green_to_blue == prev_y.green_to_blue_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if ((uint8_t)red_to_blue == prev_x.red_to_blue_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if ((uint8_t)red_to_blue == prev_y.red_to_blue_) {
-    cur_diff -= 3;  // favor keeping the areas locally similar
-  }
-  if (green_to_blue == 0) {
-    cur_diff -= 3;
-  }
-  if (red_to_blue == 0) {
-    cur_diff -= 3;
-  }
-  return cur_diff;
+    // TODO: this work is currently duplicated by all threads
+    if (ind == 0) {
+        cur_diff = PredictionCostCrossColor_device(accumulated_blue_histo, histo);
+        if ((uint8_t)green_to_blue == prev_x.green_to_blue_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if ((uint8_t)green_to_blue == prev_y.green_to_blue_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if ((uint8_t)red_to_blue == prev_x.red_to_blue_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if ((uint8_t)red_to_blue == prev_y.red_to_blue_) {
+            cur_diff -= 3;  // favor keeping the areas locally similar
+        }
+        if (green_to_blue == 0) {
+            cur_diff -= 3;
+        }
+        if (red_to_blue == 0) {
+            cur_diff -= 3;
+        }
+    }
+    __syncthreads();
+
+    return cur_diff;
 }
 
 #define kGreenRedToBlueNumAxis 8
@@ -340,8 +355,12 @@ static void GetBestGreenRedToBlue_device(
       break;  // out of iter-loop.
     }
   }
-  best_tx->green_to_blue_ = green_to_blue_best & 0xff;
-  best_tx->red_to_blue_ = red_to_blue_best & 0xff;
+
+  if (threadIdx.x == 0 && threadIdx.y == 0) {
+      best_tx->green_to_blue_ = green_to_blue_best & 0xff;
+      best_tx->red_to_blue_ = red_to_blue_best & 0xff;
+  }
+  __syncthreads();
 }
 #undef kGreenRedToBlueMaxIters
 #undef kGreenRedToBlueNumAxis
@@ -368,8 +387,11 @@ static VP8LMultipliers GetBestColorTransformForTile_device(
     const int tile_height = all_y_max - tile_y_offset;
     const uint32_t* const tile_argb = argb + tile_y_offset * xsize + tile_x_offset;
 
-    VP8LMultipliers best_tx;
-    MultipliersClear(&best_tx);
+    __shared__ VP8LMultipliers best_tx;
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        MultipliersClear(&best_tx);
+    }
+    __syncthreads();
 
     GetBestGreenToRed_device(
             tile_argb, xsize, tile_width, tile_height,
@@ -437,18 +459,25 @@ __global__ void ColorSpaceTransform_kernel(
     const int tile_ysize = VP8LSubSampleSize_device(height, bits);
 
     // TODO: prev_x and prev_y are always zeroed here
-    VP8LMultipliers prev_x, prev_y;
-    MultipliersClear(&prev_y);
-    MultipliersClear(&prev_x);
+    __shared__ VP8LMultipliers prev_x, prev_y;
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        MultipliersClear(&prev_y);
+        MultipliersClear(&prev_x);
+    }
+    __syncthreads();
 
     const int tile_x_offset = tile_x * max_tile_size;
     const int tile_y_offset = tile_y * max_tile_size;
     const int all_x_max = min(tile_x_offset + max_tile_size, width);
     const int all_y_max = min(tile_y_offset + max_tile_size, height);
     const int offset = tile_y * tile_xsize + tile_x;
-    if (tile_y != 0) {
-        ColorCodeToMultipliers(image[offset - tile_xsize], &prev_y);
-    }
+    // TODO: disabled to avoid nondeterminism
+    //if (threadIdx.x == 0 && threadIdx.y == 0) {
+    //    if (tile_y != 0) {
+    //        ColorCodeToMultipliers(image[offset - tile_xsize], &prev_y);
+    //    }
+    //}
+    //__syncthreads();
 
     // Note that device_accumulated_red_histo is passed as const.
     // So it won't be changed by this function call
@@ -470,28 +499,30 @@ __global__ void ColorSpaceTransform_kernel(
                 width, height, tile_x_offset, tile_y_offset,
                 max_tile_size, prev_x, argb);
     }
+    __syncthreads();
 
     // Gather accumulated histogram data.
-    int y = tile_y_offset + threadIdx.y;
-    int ix = y * width + tile_x_offset + threadIdx.x;
-    int ix_end = y * width + all_x_max;
+    // TODO: this is disabled due to nondeterminism
+    //int y = tile_y_offset + threadIdx.y;
+    //int ix = y * width + tile_x_offset + threadIdx.x;
+    //int ix_end = y * width + all_x_max;
 
-    if (y < all_y_max && ix < ix_end) {
-        const uint32_t pix = argb[ix];
-        bool skip =
-            (ix >= 2 && pix == argb[ix - 2] && pix == argb[ix - 1])
-                // repeated pixels are handled by backward references
-            ||
-            (ix >= width + 2 && argb[ix - 2] == argb[ix - width - 2] &&
-                argb[ix - 1] == argb[ix - width - 1] && pix == argb[ix - width])
-                // repeated pixels are handled by backward references
-            ;
-        if (!skip) {
-            // TODO: this is disabled due to nondeterminism
-            //++accumulated_red_histo[(pix >> 16) & 0xff];
-            //++accumulated_blue_histo[(pix >> 0) & 0xff];
-        }
-    }
+    //if (y < all_y_max && ix < ix_end) {
+    //    const uint32_t pix = argb[ix];
+    //    bool skip =
+    //        (ix >= 2 && pix == argb[ix - 2] && pix == argb[ix - 1])
+    //            // repeated pixels are handled by backward references
+    //        ||
+    //        (ix >= width + 2 && argb[ix - 2] == argb[ix - width - 2] &&
+    //            argb[ix - 1] == argb[ix - width - 1] && pix == argb[ix - width])
+    //            // repeated pixels are handled by backward references
+    //        ;
+    //    if (!skip) {
+    //        ++accumulated_red_histo[(pix >> 16) & 0xff];
+    //        ++accumulated_blue_histo[(pix >> 0) & 0xff];
+    //    }
+    //}
+    //__syncthreads();
 }
 
 
