@@ -176,6 +176,10 @@ __device__ float CombinedShannonEntropy_device(const int X[256], const int Y[256
 #undef BLOCK_THREADS
 #undef ITEMS_PER_THREAD
 
+/* 
+    !!! TODO #2 !!!
+    Transform PredictionCostSpatial_device helper to use CUB primitives, just like CombinedShannonEntropy_device
+*/
 __device__ __inline__ float PredictionCostSpatial_device(
     const int counts[256], int weight_0, double exp_val) {
   const int significant_symbols = 256 >> 4;
@@ -188,6 +192,11 @@ __device__ __inline__ float PredictionCostSpatial_device(
   }
   return (float)(-0.1 * bits);
 }
+
+/* 
+    !!! TODO #3 !!!
+    Transform PredictionCostCrossColor_device to have each thread do the relevant work, just like CopyTileWithColorTransform
+*/
 
 __device__ float PredictionCostCrossColor_device(
         const int accumulated[256], const int counts[256]) {
@@ -523,21 +532,81 @@ void TransformColor_device(const VP8LMultipliers* const m, uint32_t* data,
   }
 }
 
-__device__ __inline__
-static void CopyTileWithColorTransform_device(
-        int xsize, int ysize,
-        int tile_x, int tile_y,
-        int max_tile_size,
-        VP8LMultipliers color_transform,
-        uint32_t* argb) {
+/* 
+    !!! TODO #1 !!!
 
-    const int xscan = min(max_tile_size, xsize - tile_x);
-    int yscan = min(max_tile_size, ysize - tile_y);
-    argb += tile_y * xsize + tile_x;
-    while (yscan-- > 0) {
-        TransformColor_device(&color_transform, argb, xscan);
-        argb += xsize;
-    }
+    Replace if-statement with singleton thread invoking nested sequential loop version of CopyTile 
+    with custom assignment for each tread to call on the CopyTileWithColorTransform_device
+    DO NOT WRITE A NEW KERNEL - modify ColorSpaceTransform kernel to invoke CopyTileWithColorTransform_device directly,
+    each thread doing a call on CopyTileWithColorTransform_device
+
+    Refer to CollectColorRedTransform for indexing example
+
+*/
+
+// __device__ __inline__
+// static void CopyTileWithColorTransform_device(
+//         int xsize, int ysize,
+//         int tile_x, int tile_y,
+//         int max_tile_size,
+//         VP8LMultipliers color_transform,
+//         uint32_t* data) {
+
+//     //ASSIGN PROPER INDICES.
+//     const int xscan = min(max_tile_size, xsize - tile_x);
+//     int yscan = min(max_tile_size, ysize - tile_y);
+//     data += tile_y * xsize + tile_x;
+
+//     while (yscan-- > 0) {
+//         for (int i = 0; i < xscan; ++i) {            // *** Refer to CollectColorRedTransform 
+//           //START HERE
+//           const uint32_t argb = data[i];
+//           const int8_t green = U32ToS8(argb >>  8);
+//           const int8_t red   = U32ToS8(argb >> 16);
+//           int new_red = red & 0xff;
+//           int new_blue = argb & 0xff;
+//           new_red -= ColorTransformDelta(color_transform.green_to_red_, green);
+//           new_red &= 0xff;
+//           new_blue -= ColorTransformDelta(color_transform.green_to_blue_, green);
+//           new_blue -= ColorTransformDelta(color_transform.red_to_blue_, red);
+//           new_blue &= 0xff;
+//           data[i] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
+//           //END HERE
+//         }
+//         data += xsize;
+//     }
+// }
+
+
+__device__ __inline__
+static void CopyTileWithColorTransform_device(int xsize, int ysize,
+                                              int tile_x, int tile_y,
+                                              int max_tile_size,
+                                              VP8LMultipliers color_transform,
+                                              uint32_t* data) {
+
+    // Overall index from position of thread in current block, and given the block we are in.
+    int x = blockIdx.x * blockDim.x + threadIdx.x;    //equivalent to i counter
+    int y = blockIdx.y * blockDim.y + threadIdx.y;    //equivalent to yscan counter
+
+    // Calculate bounding values, offset into argb
+    const int xscan = min(max_tile_size, xsize - tile_x);       // 0 <= i < xscan
+    //const int yscan = min(max_tile_size, ysize - tile_y);     // yscan = y > 0
+    data += tile_y * xsize + tile_x;
+
+    if (x >= xscan || y <= 0) return;
+
+    const uint32_t argb = data[xsize * y + x];      // Adjusted x, to account for data += xsize
+    const int8_t green = U32ToS8(argb >>  8);
+    const int8_t red   = U32ToS8(argb >> 16);
+    int new_red = red & 0xff;
+    int new_blue = argb & 0xff;
+    new_red -= ColorTransformDelta(color_transform.green_to_red_, green);
+    new_red &= 0xff;
+    new_blue -= ColorTransformDelta(color_transform.green_to_blue_, green);
+    new_blue -= ColorTransformDelta(color_transform.red_to_blue_, red);
+    new_blue &= 0xff;
+    data[xsize * y + x] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
 }
 
 //------------------------------------------------------------------------------
@@ -591,13 +660,20 @@ ColorSpaceTransform_kernel(
 
     // These need to only be performed by one thread
     // TODO: parallelize this
-    if (threadIdx.x == 0 && threadIdx.y == 0) {
-        image[offset] = MultipliersToColorCode(&prev_x);
+    // if (threadIdx.x == 0 && threadIdx.y == 0) {
+    //     image[offset] = MultipliersToColorCode(&prev_x);
 
-        CopyTileWithColorTransform_device(
+    //     CopyTileWithColorTransform_device(
+    //             width, height, tile_x_offset, tile_y_offset,
+    //             max_tile_size, prev_x, argb);
+    // }
+
+
+    // Parallelizing CopyTileWithColorTransform_device...
+    CopyTileWithColorTransform_device(
                 width, height, tile_x_offset, tile_y_offset,
                 max_tile_size, prev_x, argb);
-    }
+
     __syncthreads();
 
     // Gather accumulated histogram data.
@@ -673,6 +749,10 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
     cudaCheckError(cudaFree(device_accumulated_blue_histo));
 }
 
+/*
+    !!! TODO #4 !!!
+    Write + run script to run cwebp on all images in the folders (+ maybe get initial reference timings for ColorTransform overall)
+*/
 
 
 } // extern "C"
