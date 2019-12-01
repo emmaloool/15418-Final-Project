@@ -446,7 +446,9 @@ static void CopyTileWithColorTransform_device(
 //------------------------------------------------------------------------------
 // ColorSpaceTransform
 
-__global__ void ColorSpaceTransform_kernel(
+__global__ void
+__launch_bounds__(1024)
+ColorSpaceTransform_kernel(
         int width, int height, int bits, int quality,
         uint32_t* const argb, uint32_t* image,
         int accumulated_red_histo[256], int accumulated_blue_histo[256]) {
