@@ -19,6 +19,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <chrono>
+#include "src/cub/cub.cuh"
 #include "src/dsp/lossless.h"
 #include "src/dsp/lossless_common.h"
 #include "src/enc/vp8li_enc.h"
@@ -73,7 +74,7 @@ __device__ __inline__ float SlowSLog2_device(float x) {
 }
 
 // Compute the combined Shanon's entropy for distribution {X} and {X+Y}
-__device__ __inline__ float CombinedShannonEntropy_device(const int X[256], const int Y[256]) {
+__device__ float CombinedShannonEntropy_seq_device(const int X[256], const int Y[256]) {
   int i;
   double retval = 0.;
   int sumX = 0, sumXY = 0;
@@ -94,6 +95,87 @@ __device__ __inline__ float CombinedShannonEntropy_device(const int X[256], cons
   return (float)retval;
 }
 
+// Compute the combined Shanon's entropy for distribution {X} and {X+Y}
+// Note that BLOCK_THREADS is set to the tile width; if it's larger you might need
+//   to change the template parameters to BlockReduce{Int,Float}T.
+#define BLOCK_THREADS 32
+#define ITEMS_PER_THREAD (256/BLOCK_THREADS)
+__device__ float CombinedShannonEntropy_device(const int X[256], const int Y[256]) {
+
+    // Specialize BlockReduce for a 1D block of 256 threads on type int
+    // TODO: for some reason, BLOCK_REDUCE_WARP_REDUCTIONS produces wrong result. Why?
+    typedef cub::BlockReduce<int, BLOCK_THREADS, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY> BlockReduceIntT;
+    typedef cub::BlockReduce<float, BLOCK_THREADS, cub::BLOCK_REDUCE_RAKING_COMMUTATIVE_ONLY> BlockReduceFloatT;
+
+    __shared__ double entropy_result;
+    __shared__ union {
+        typename BlockReduceIntT::TempStorage reduce_int;
+        typename BlockReduceFloatT::TempStorage reduce_float;
+    } temp;
+
+    const int index = threadIdx.y * blockDim.x + threadIdx.x;
+
+    int my_x_data[ITEMS_PER_THREAD];
+    int my_y_data[ITEMS_PER_THREAD];
+    float my_entropy_data[ITEMS_PER_THREAD];
+
+    // ==============================================================
+    // Compute sumX and sumY
+
+    if (index < BLOCK_THREADS) {
+        cub::LoadDirectBlocked(index, X, my_x_data);
+        cub::LoadDirectBlocked(index, Y, my_y_data);
+    }
+
+    int sumX = BlockReduceIntT(temp.reduce_int).Sum(my_x_data);
+    int sumY = BlockReduceIntT(temp.reduce_int).Sum(my_y_data);
+    __syncthreads();
+
+    // ==============================================================
+    // Compute entropy
+
+    if (index < BLOCK_THREADS) {
+        for (int j = 0; j < ITEMS_PER_THREAD; j++) {
+            const int x = my_x_data[j];
+            const int xy = x + my_y_data[j];
+            float entropy = 0.;
+            if (x != 0) {
+                entropy -= SlowSLog2_device(x);
+            }
+            if (xy != 0) {
+                entropy -= SlowSLog2_device(xy);
+            }
+            my_entropy_data[j] = entropy;
+        }
+    }
+    __syncthreads();
+
+    float sumEntropy = BlockReduceFloatT(temp.reduce_float).Sum(my_entropy_data);
+    __syncthreads();
+
+    if (index == 0) {
+#if 0
+        // NOTE: Correctness checking commented out
+        int my_sumX = 0;
+        int my_sumY = 0;
+        for (int i = 0; i < 256; i++) { my_sumX += X[i]; my_sumY += Y[i]; }
+        if (sumX != my_sumX) printf("BADDDDDDDDDd X %d != %d\n", sumX, my_sumX);
+        if (sumY != my_sumY) printf("BADDDDDDDDDd Y %d != %d\n", sumY, my_sumY);
+#endif
+        entropy_result =
+            SlowSLog2_device(sumX) +
+            SlowSLog2_device(sumX + sumY) +
+            sumEntropy;
+    }
+    __syncthreads();
+
+    // ==============================================================
+    // Return final result
+    return (float) entropy_result;
+}
+#undef BLOCK_THREADS
+#undef ITEMS_PER_THREAD
+
 __device__ __inline__ float PredictionCostSpatial_device(
     const int counts[256], int weight_0, double exp_val) {
   const int significant_symbols = 256 >> 4;
@@ -107,14 +189,33 @@ __device__ __inline__ float PredictionCostSpatial_device(
   return (float)(-0.1 * bits);
 }
 
-__device__ __inline__ float PredictionCostCrossColor_device(
+__device__ float PredictionCostCrossColor_device(
         const int accumulated[256], const int counts[256]) {
 
-  // Favor low entropy, locally and globally.
-  // Favor small absolute values for PredictionCostSpatial
-  static const double kExpValue = 2.4;
-  return CombinedShannonEntropy_device(counts, accumulated) +
-         PredictionCostSpatial_device(counts, 3, kExpValue);
+    // Favor low entropy, locally and globally.
+    // Favor small absolute values for PredictionCostSpatial
+    static const double kExpValue = 2.4;
+
+    float result_entropy = CombinedShannonEntropy_device(counts, accumulated);
+
+    __shared__ float result_spatial;
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        result_spatial = PredictionCostSpatial_device(counts, 3, kExpValue);
+    }
+    __syncthreads();
+
+#if 0
+    // NOTE: Correctness checking commented out
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        float other_result =
+            CombinedShannonEntropy_seq_device(counts, accumulated);
+        if (abs(result_entropy - other_result) > 1.) {
+            printf("RESULT VERY DIFFERENT: %f, %f\n", result_entropy, other_result);
+        }
+    }
+#endif
+
+    return result_entropy + result_spatial;
 }
 
 //------------------------------------------------------------------------------
@@ -172,20 +273,18 @@ static float GetPredictionCostCrossColorRed_device(
         argb, stride, tile_width, tile_height,
         green_to_red, histo);
 
-    __shared__ float cur_diff;
+    float cur_diff;
 
     // TODO: this work is currently duplicated by all threads
-    if (ind == 0) {
-        cur_diff = PredictionCostCrossColor_device(accumulated_red_histo, histo);
-        if ((uint8_t)green_to_red == prev_x.green_to_red_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if ((uint8_t)green_to_red == prev_y.green_to_red_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if (green_to_red == 0) {
-            cur_diff -= 3;
-        }
+    cur_diff = PredictionCostCrossColor_device(accumulated_red_histo, histo);
+    if ((uint8_t)green_to_red == prev_x.green_to_red_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if ((uint8_t)green_to_red == prev_y.green_to_red_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if (green_to_red == 0) {
+        cur_diff -= 3;
     }
     __syncthreads();
 
@@ -283,26 +382,24 @@ static float GetPredictionCostCrossColorBlue_device(
     __shared__ float cur_diff;
 
     // TODO: this work is currently duplicated by all threads
-    if (ind == 0) {
-        cur_diff = PredictionCostCrossColor_device(accumulated_blue_histo, histo);
-        if ((uint8_t)green_to_blue == prev_x.green_to_blue_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if ((uint8_t)green_to_blue == prev_y.green_to_blue_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if ((uint8_t)red_to_blue == prev_x.red_to_blue_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if ((uint8_t)red_to_blue == prev_y.red_to_blue_) {
-            cur_diff -= 3;  // favor keeping the areas locally similar
-        }
-        if (green_to_blue == 0) {
-            cur_diff -= 3;
-        }
-        if (red_to_blue == 0) {
-            cur_diff -= 3;
-        }
+    cur_diff = PredictionCostCrossColor_device(accumulated_blue_histo, histo);
+    if ((uint8_t)green_to_blue == prev_x.green_to_blue_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if ((uint8_t)green_to_blue == prev_y.green_to_blue_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if ((uint8_t)red_to_blue == prev_x.red_to_blue_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if ((uint8_t)red_to_blue == prev_y.red_to_blue_) {
+        cur_diff -= 3;  // favor keeping the areas locally similar
+    }
+    if (green_to_blue == 0) {
+        cur_diff -= 3;
+    }
+    if (red_to_blue == 0) {
+        cur_diff -= 3;
     }
     __syncthreads();
 
