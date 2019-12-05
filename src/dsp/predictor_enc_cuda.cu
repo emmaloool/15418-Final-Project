@@ -591,10 +591,10 @@ static void CopyTileWithColorTransform_device(int xsize, int ysize,
 
     // Calculate bounding values, offset into argb
     const int xscan = min(max_tile_size, xsize - tile_x);       // 0 <= i < xscan
-    //const int yscan = min(max_tile_size, ysize - tile_y);     // yscan = y > 0
+    const int yscan = min(max_tile_size, ysize - tile_y);     // yscan = y > 0
     data += tile_y * xsize + tile_x;
 
-    if (x >= xscan || y <= 0) return;
+    if (x >= xscan || y >= yscan) return;
 
     const uint32_t argb = data[xsize * y + x];      // Adjusted x, to account for data += xsize
     const int8_t green = U32ToS8(argb >>  8);
@@ -669,7 +669,7 @@ ColorSpaceTransform_kernel(
     // }
 
 
-    // Parallelizing CopyTileWithColorTransform_device...
+    // // Parallelizing CopyTileWithColorTransform_device...
     CopyTileWithColorTransform_device(
                 width, height, tile_x_offset, tile_y_offset,
                 max_tile_size, prev_x, argb);
