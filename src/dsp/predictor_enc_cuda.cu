@@ -198,7 +198,7 @@ __device__ __inline__ float PredictionCostSpatial_device(
     Transform PredictionCostCrossColor_device to have each thread do the relevant work, just like CopyTileWithColorTransform
 */
 
-__device__ float PredictionCostCrossColor_device(
+__device__ __inline__ float PredictionCostCrossColor_device(
         const int accumulated[256], const int counts[256]) {
 
     // Favor low entropy, locally and globally.
@@ -512,71 +512,8 @@ static VP8LMultipliers GetBestColorTransformForTile_device(
 }
 
 //------------------------------------------------------------------------------
-
-__device__ __inline__
-void TransformColor_device(const VP8LMultipliers* const m, uint32_t* data,
-                           int num_pixels) {
-  int i;
-  for (i = 0; i < num_pixels; ++i) {
-    const uint32_t argb = data[i];
-    const int8_t green = U32ToS8(argb >>  8);
-    const int8_t red   = U32ToS8(argb >> 16);
-    int new_red = red & 0xff;
-    int new_blue = argb & 0xff;
-    new_red -= ColorTransformDelta(m->green_to_red_, green);
-    new_red &= 0xff;
-    new_blue -= ColorTransformDelta(m->green_to_blue_, green);
-    new_blue -= ColorTransformDelta(m->red_to_blue_, red);
-    new_blue &= 0xff;
-    data[i] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
-  }
-}
-
-/* 
-    !!! TODO #1 !!!
-
-    Replace if-statement with singleton thread invoking nested sequential loop version of CopyTile 
-    with custom assignment for each tread to call on the CopyTileWithColorTransform_device
-    DO NOT WRITE A NEW KERNEL - modify ColorSpaceTransform kernel to invoke CopyTileWithColorTransform_device directly,
-    each thread doing a call on CopyTileWithColorTransform_device
-
-    Refer to CollectColorRedTransform for indexing example
-
-*/
-
-// __device__ __inline__
-// static void CopyTileWithColorTransform_device(
-//         int xsize, int ysize,
-//         int tile_x, int tile_y,
-//         int max_tile_size,
-//         VP8LMultipliers color_transform,
-//         uint32_t* data) {
-
-//     //ASSIGN PROPER INDICES.
-//     const int xscan = min(max_tile_size, xsize - tile_x);
-//     int yscan = min(max_tile_size, ysize - tile_y);
-//     data += tile_y * xsize + tile_x;
-
-//     while (yscan-- > 0) {
-//         for (int i = 0; i < xscan; ++i) {            // *** Refer to CollectColorRedTransform 
-//           //START HERE
-//           const uint32_t argb = data[i];
-//           const int8_t green = U32ToS8(argb >>  8);
-//           const int8_t red   = U32ToS8(argb >> 16);
-//           int new_red = red & 0xff;
-//           int new_blue = argb & 0xff;
-//           new_red -= ColorTransformDelta(color_transform.green_to_red_, green);
-//           new_red &= 0xff;
-//           new_blue -= ColorTransformDelta(color_transform.green_to_blue_, green);
-//           new_blue -= ColorTransformDelta(color_transform.red_to_blue_, red);
-//           new_blue &= 0xff;
-//           data[i] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
-//           //END HERE
-//         }
-//         data += xsize;
-//     }
-// }
-
+// CopyTileWithColorTransform - unserialized, now each thread computes its works
+// in the scope of copying when launched from ColorSpaceTransform
 
 __device__ __inline__
 static void CopyTileWithColorTransform_device(int xsize, int ysize,
@@ -658,18 +595,7 @@ ColorSpaceTransform_kernel(
             accumulated_blue_histo,
             argb);
 
-    // These need to only be performed by one thread
-    // TODO: parallelize this
-    // if (threadIdx.x == 0 && threadIdx.y == 0) {
-    //     image[offset] = MultipliersToColorCode(&prev_x);
-
-    //     CopyTileWithColorTransform_device(
-    //             width, height, tile_x_offset, tile_y_offset,
-    //             max_tile_size, prev_x, argb);
-    // }
-
-
-    // // Parallelizing CopyTileWithColorTransform_device...
+    // Parallelizing CopyTileWithColorTransform_device...
     CopyTileWithColorTransform_device(
                 width, height, tile_x_offset, tile_y_offset,
                 max_tile_size, prev_x, argb);
