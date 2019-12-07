@@ -15,6 +15,7 @@
 #  followed by a standard make command.
 ####################################################################
 
+import subprocess
 import os
 import sys
 import argparse
@@ -67,59 +68,61 @@ def run_cwebp(args):
     print(INPUT)
     if not os.path.isdir(INPUT):
         print("Cannot access ../IMAGES/INPUT path.")
-        sys.exit()
+        sys.exit(0)
 
     # Prepare directory to contain image output files
     runtime_files_path = os.path.join(OUTPUT, "runtimes")
     # if not os.path.isdir(runtime_files_path):
     #     os.mkdir(runtime_files_path)
 
+    big_file = os.path.join(project_path, runtime_file)
+    bg = open(big_file, 'w+')
 
     if args.file:
         # Extrace basename from original image file
         file_base = os.path.splitext(args.file)[0]
         file_webp = file_base + '.webp'
 
-        print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp))
+        print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
 
         img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        sys.stdout = open(img_output_file, 'w+')
-
-        cmd = "{} -lossless {} -o {} &>> {}".format(os.path.join(build_path, "cwebp"), 
+        cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
                                             os.path.join(INPUT, args.file), 
-                                            os.path.join(OUTPUT, file_webp),
-                                            img_output_file)
+                                            os.path.join(OUTPUT, file_webp))
 
 
         print("Running iteration 1/1... ")
         print("----------------------------------------------------------------")
-        os.system(cmd)
+        subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
         print("----------------------------------------------------------------\n")
 
+    else: 
+        # Iterations will be produced i times consecutively for each photo
+        for img in os.listdir(INPUT):
+            file_base = os.path.splitext(img)[0]
+            file_webp = file_base + '.webp'
 
+            img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
+            f = open(img_output_file, 'w+')
 
-    # Iterations will be produced i times consecutively for each photo
-    for img in os.listdir(INPUT):
+            print("#################### Converting {} to {}... ####################\n".format(img, file_webp), file=f)
 
-        file_base = os.path.splitext(img)[0]
-        file_webp = file_base + '.webp'
+            cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
+                                                os.path.join(INPUT, img), 
+                                                os.path.join(OUTPUT, file_webp))
+            
+            for i in range(0, args.iterations):
+                print("Running iteration {}/{}...".format(i, args.iterations), file=f)
+                print("----------------------------------------------------------------", file=f)
+                f.flush()
+                subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, shell=True)
+                print("----------------------------------------------------------------\n", file=f)
+                f.flush()
+            f.close()
 
-        print("#################### Converting {} to {}... ####################\n".format(img, file_webp))
-
-        img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        sys.stdout = open(img_output_file, 'w+')
-
-        cmd = "{} -lossless {} -o {} &>> {}".format(os.path.join(build_path, "cwebp"), 
-                                            os.path.join(INPUT, img), 
-                                            os.path.join(OUTPUT, file_webp),
-                                            img_output_file)
-        
-        for i in range(0, args.iterations):
-            print("Running iteration {}/{}...".format(i, args.iterations))
-            print("----------------------------------------------------------------")
-            os.system(cmd)
-            print("----------------------------------------------------------------\n")
-            print()
+            f = open(img_output_file, 'r')
+            bg.write(f.read())
+            f.close()
 
 
 def main():
