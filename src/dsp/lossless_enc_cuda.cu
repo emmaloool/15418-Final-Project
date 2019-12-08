@@ -14,6 +14,7 @@
 #include "src/dsp/dsp.h"
 
 #if defined(WEBP_USE_CUDA)
+#include "src/cub/cub.cuh"
 #include <assert.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -676,6 +677,12 @@ extern "C" static void VP8LColorSpaceTransform_Wrapper(
 extern "C" void VP8LEncDspInitCUDA(void);
 
 WEBP_TSAN_IGNORE_FUNCTION void VP8LEncDspInitCUDA(void) {
+    // Note: this performs a kernel launch, avoiding the ~70 ms overhead
+    // incurred by the first kernel launch in the program
+    int ptx_version;
+    cudaCheckError(cub::PtxVersion(ptx_version));
+    printf("PTX version: %d\n", ptx_version);
+
     VP8LColorSpaceTransform = VP8LColorSpaceTransform_Wrapper;
 
     //VP8LSubtractGreenFromBlueAndRed_old = VP8LSubtractGreenFromBlueAndRed;
