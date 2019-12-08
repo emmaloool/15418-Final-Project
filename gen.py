@@ -74,7 +74,7 @@ def run_cwebp(args):
     os.mkdir(runtime_files_path)
 
     big_file = os.path.join(project_path, runtime_file)
-    bg = open(big_file, 'a+')
+    bg = open(big_file, 'w+')
 
     if args.file:
         file_base = os.path.splitext(args.file)[0]

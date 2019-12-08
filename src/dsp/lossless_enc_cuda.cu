@@ -566,9 +566,6 @@ __global__ void VP8LBundleColorMap_kernel(const uint8_t *row, int width, int xbi
 
 static void BundleColorMap_CUDA(const uint8_t *row, int width, int xbits,
                                 uint32_t *dst) {
-
-    printf("HELLO WORLD WE ARE CALLING BundleColorMap_CUDA\n");
-
     // Compute number of tasks
     const int num_tasks = width >> xbits;
     const int threads_per_block = 512;
