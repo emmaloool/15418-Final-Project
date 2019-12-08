@@ -20,6 +20,7 @@ import os
 import sys
 import argparse
 import re
+import shutil
 
 project_path = os.path.abspath(".")
 build_path = os.path.join(project_path, "build") 
@@ -70,18 +71,25 @@ def run_cwebp(args):
         print("Cannot access ../IMAGES/INPUT path.")
         sys.exit(0)
 
+    if os.path.isdir(OUTPUT):
+        shutil.rmtree(OUTPUT)
+    os.mkdir(OUTPUT)
+
     # Prepare directory to contain image output files
     runtime_files_path = os.path.join(OUTPUT, "runtimes")
-    # if not os.path.isdir(runtime_files_path):
-    #     os.mkdir(runtime_files_path)
+    os.mkdir(runtime_files_path)
+    # print(runtime_files_path)
 
     big_file = os.path.join(project_path, runtime_file)
     bg = open(big_file, 'w+')
 
     if args.file:
-        # Extrace basename from original image file
         file_base = os.path.splitext(args.file)[0]
         file_webp = file_base + '.webp'
+
+        img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
+        print(img_put)
+        # f = open(img_output_file, 'w+')
 
         print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
 
@@ -90,10 +98,10 @@ def run_cwebp(args):
                                             os.path.join(INPUT, args.file), 
                                             os.path.join(OUTPUT, file_webp))
 
-
+        print(cmd)
         print("Running iteration 1/1... ")
         print("----------------------------------------------------------------")
-        subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
+        # subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
         print("----------------------------------------------------------------\n")
 
     else: 
@@ -103,6 +111,7 @@ def run_cwebp(args):
             file_webp = file_base + '.webp'
 
             img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
+            print(img_output_file)
             f = open(img_output_file, 'w+')
 
             print("#################### Converting {} to {}... ####################\n".format(img, file_webp), file=f)
@@ -112,7 +121,7 @@ def run_cwebp(args):
                                                 os.path.join(OUTPUT, file_webp))
             
             for i in range(0, args.iterations):
-                print("Running iteration {}/{}...".format(i, args.iterations), file=f)
+                print("Running iteration {}/{}...".format(i+1, args.iterations), file=f)
                 print("----------------------------------------------------------------", file=f)
                 f.flush()
                 subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, shell=True)

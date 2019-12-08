@@ -176,27 +176,20 @@ __device__ float CombinedShannonEntropy_device(const int X[256], const int Y[256
 #undef BLOCK_THREADS
 #undef ITEMS_PER_THREAD
 
-/* 
-    !!! TODO #2 !!!
-    Transform PredictionCostSpatial_device helper to use CUB primitives, just like CombinedShannonEntropy_device
-*/
+
 __device__ __inline__ float PredictionCostSpatial_device(
     const int counts[256], int weight_0, double exp_val) {
-  const int significant_symbols = 256 >> 4;
-  const double exp_decay_factor = 0.6;
-  double bits = weight_0 * counts[0];
-  int i;
-  for (i = 1; i < significant_symbols; ++i) {
-    bits += exp_val * (counts[i] + counts[256 - i]);
-    exp_val *= exp_decay_factor;
-  }
-  return (float)(-0.1 * bits);
+    const int significant_symbols = 256 >> 4;
+    const double exp_decay_factor = 0.6;
+    double bits = weight_0 * counts[0];
+    int i;
+    for (i = 1; i < significant_symbols; ++i) {
+        bits += exp_val * (counts[i] + counts[256 - i]);
+        exp_val *= exp_decay_factor;
+    }
+    return (float)(-0.1 * bits);
 }
 
-/* 
-    !!! TODO #3 !!!
-    Transform PredictionCostCrossColor_device to have each thread do the relevant work, just like CopyTileWithColorTransform
-*/
 
 __device__ __inline__ float PredictionCostCrossColor_device(
         const int accumulated[256], const int counts[256]) {
@@ -674,12 +667,6 @@ void VP8LColorSpaceTransform_CUDA(int width, int height, int bits, int quality,
     cudaCheckError(cudaFree(device_accumulated_red_histo));
     cudaCheckError(cudaFree(device_accumulated_blue_histo));
 }
-
-/*
-    !!! TODO #4 !!!
-    Write + run script to run cwebp on all images in the folders (+ maybe get initial reference timings for ColorTransform overall)
-*/
-
 
 } // extern "C"
 
