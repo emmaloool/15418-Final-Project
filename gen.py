@@ -90,10 +90,18 @@ def run_cwebp(args):
                                             os.path.join(INPUT, args.file), 
                                             os.path.join(OUTPUT, file_webp))
 
-        print("Running iteration 1/1... ", file=f)
-        print("----------------------------------------------------------------", file=f)
-        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, shell=True)
-        print("----------------------------------------------------------------\n", file=f)
+        for i in range(0, args.iterations):
+            print("Running iteration {}/{}...".format(i+1, args.iterations), file=f)
+            print("----------------------------------------------------------------", file=f)
+            f.flush()
+            subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, shell=True)
+            print("----------------------------------------------------------------\n", file=f)
+            f.flush()
+        f.close()
+
+        f = open(img_output_file, 'r')
+        bg.write(f.read())
+        f.close()
 
     else: 
         # Iterations will be produced i times consecutively for each photo
