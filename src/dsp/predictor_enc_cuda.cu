@@ -523,17 +523,17 @@ static void CopyTileWithColorTransform_device(int xsize, int ysize,
                                               uint32_t* data) {
 
     // Overall index from position of thread in current block, and given the block we are in.
-    int x = blockIdx.x * blockDim.x + threadIdx.x;    //equivalent to i counter
-    int y = blockIdx.y * blockDim.y + threadIdx.y;    //equivalent to yscan counter
+    int x = threadIdx.x;    //equivalent to i counter
+    int y = threadIdx.y;    //equivalent to yscan counter
 
     // Calculate bounding values, offset into argb
-    const int xscan = min(max_tile_size, xsize - tile_x);       // 0 <= i < xscan
-    const int yscan = min(max_tile_size, ysize - tile_y);     // yscan = y > 0
-    data += tile_y * xsize + tile_x;
+    const int xscan = min(max_tile_size, xsize - tile_x);       // 0 <= x < xscan
+    const int yscan = min(max_tile_size, ysize - tile_y);       // 0 <= y < yscan
 
     if (x >= xscan || y >= yscan) return;
 
-    const uint32_t argb = data[xsize * y + x];      // Adjusted x, to account for data += xsize
+    size_t i = (tile_y + y) * xsize + (tile_x + x);
+    const uint32_t argb = data[i];
     const int8_t green = U32ToS8(argb >>  8);
     const int8_t red   = U32ToS8(argb >> 16);
     int new_red = red & 0xff;
@@ -543,7 +543,7 @@ static void CopyTileWithColorTransform_device(int xsize, int ysize,
     new_blue -= ColorTransformDelta(color_transform.green_to_blue_, green);
     new_blue -= ColorTransformDelta(color_transform.red_to_blue_, red);
     new_blue &= 0xff;
-    data[xsize * y + x] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
+    data[i] = (argb & 0xff00ff00u) | (new_red << 16) | (new_blue);
 }
 
 //------------------------------------------------------------------------------
@@ -594,6 +594,11 @@ ColorSpaceTransform_kernel(
             accumulated_red_histo,
             accumulated_blue_histo,
             argb);
+
+    if (threadIdx.x == 0 && threadIdx.y == 0) {
+        image[offset] = MultipliersToColorCode(&prev_x);
+    }
+    __syncthreads();
 
     // Parallelizing CopyTileWithColorTransform_device...
     CopyTileWithColorTransform_device(
