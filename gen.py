@@ -55,18 +55,12 @@ def get_args():
     if (not args.iterations):
         args.iterations = 1
 
-    # Optional argument: number of iterations for testing. 
-    # Default behavior is to run cwebp once on each image in ./IMAGES/INPUT folder
-    if (args.file) and (not os.path.isfile(args.file)):
-        args.file = None
-
     # ! TODO: add "lossless" cwebp commandline parameter here
 
     return args
 
 
 def run_cwebp(args):
-    print(INPUT)
     if not os.path.isdir(INPUT):
         print("Cannot access ../IMAGES/INPUT path.")
         sys.exit(0)
@@ -78,31 +72,28 @@ def run_cwebp(args):
     # Prepare directory to contain image output files
     runtime_files_path = os.path.join(OUTPUT, "runtimes")
     os.mkdir(runtime_files_path)
-    # print(runtime_files_path)
 
     big_file = os.path.join(project_path, runtime_file)
-    bg = open(big_file, 'w+')
+    bg = open(big_file, 'a+')
 
     if args.file:
         file_base = os.path.splitext(args.file)[0]
         file_webp = file_base + '.webp'
 
         img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        print(img_output_file)
-        # f = open(img_output_file, 'w+')
+        f = open(img_output_file, 'w+')
 
-        # print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
+        print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
 
-        # img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        # cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
-        #                                     os.path.join(INPUT, args.file), 
-        #                                     os.path.join(OUTPUT, file_webp))
+        img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
+        cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
+                                            os.path.join(INPUT, args.file), 
+                                            os.path.join(OUTPUT, file_webp))
 
-        # print(cmd)
-        # print("Running iteration 1/1... ")
-        # print("----------------------------------------------------------------")
-        # # subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
-        # print("----------------------------------------------------------------\n")
+        print("Running iteration 1/1... ", file=f)
+        print("----------------------------------------------------------------", file=f)
+        subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, shell=True)
+        print("----------------------------------------------------------------\n", file=f)
 
     else: 
         # Iterations will be produced i times consecutively for each photo
