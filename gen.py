@@ -88,21 +88,21 @@ def run_cwebp(args):
         file_webp = file_base + '.webp'
 
         img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        print(img_put)
+        print(img_output_file)
         # f = open(img_output_file, 'w+')
 
-        print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
+        # print("#################### Converting {} to {}... ####################\n".format(args.file, file_webp), file=f)
 
-        img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
-        cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
-                                            os.path.join(INPUT, args.file), 
-                                            os.path.join(OUTPUT, file_webp))
+        # img_output_file = os.path.join(runtime_files_path, "{}.txt".format(file_base))
+        # cmd = "{} -lossless {} -o {}".format(os.path.join(build_path, "cwebp"), 
+        #                                     os.path.join(INPUT, args.file), 
+        #                                     os.path.join(OUTPUT, file_webp))
 
-        print(cmd)
-        print("Running iteration 1/1... ")
-        print("----------------------------------------------------------------")
-        # subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
-        print("----------------------------------------------------------------\n")
+        # print(cmd)
+        # print("Running iteration 1/1... ")
+        # print("----------------------------------------------------------------")
+        # # subprocess.run(cmd, stdout=open(img_output_file, 'w+'), stderr=subprocess.STDOUT, shell=True)
+        # print("----------------------------------------------------------------\n")
 
     else: 
         # Iterations will be produced i times consecutively for each photo
