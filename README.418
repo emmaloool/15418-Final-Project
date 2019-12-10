@@ -1,0 +1,59 @@
+Accelerating WebP Lossless Encoding
+===================================
+
+15-418 Final Project
+Kevin Geng and Emma Liu
+
+Project website:
+https://emmaloool.github.io/15418-Final-Project/
+
+Project repository:
+https://github.com/emmaloool/15418-Final-Project
+
+Handin file
+-----------
+
+The tar file handin.tar contains the files we focused most of our
+modifications on. It does not contain enough to actually build the project.
+In particular, some other files also contain changes that are necessary
+to build our project.
+
+Build instructions
+------------------
+
+Using CUDA with CMake requires CMake >= 3.7. This version is not installed
+on the GHC clusters, but this can be done with some subset of the following
+commands:
+
+    mkdir ~/bin && cd ~/bin
+    wget https://github.com/Kitware/CMake/releases/download/v3.15.5/cmake-3.15.5-Linux-x86_64.tar.gz
+    tar xvf cmake-3.15.5-Linux-x86_64.tar.gz
+    echo 'export PATH=~/bin/cmake-3.15.5-Linux-x86_64/bin:$PATH' >> ~/.bashrc
+
+Building a version of libwebp that is able to convert JPEG and PNG files
+requires installing the `libjpeg` and `libpng` libraries to link against.
+
+Building the project requires a recent version of NVCC (NVIDIA CUDA
+Compiler). This is already pre-installed on the GHC clusters.
+
+The build instructions we used are:
+
+    mkdir build && cd build
+    cmake -DWEBP_BUILD_CWEBP=ON -DWEBP_BUILD_DWEBP=ON -DWEBP_BUILD_WEBPINFO=ON -DCMAKE_CUDA_FLAGS="-gencode=arch=compute_30,code=sm_30 -gencode=arch=compute_35,code=sm_35 -gencode=arch=compute_50,code=sm_50 -gencode=arch=compute_52,code=sm_52 -gencode=arch=compute_60,code=sm_60 -gencode=arch=compute_61,code=sm_61 -gencode=arch=compute_61,code=compute_61 -Xptxas=-v --ptxas-options=-v" ..
+    make
+
+This produces executables in the `build/` directory, such as `cwebp` and
+`dwebp` (which convert to and from the WebP format respectively). A less
+extensive set of CUDA flags is certainly possible if the target
+architecture is known ahead of time, or if using JIT compilation is not
+a big deal (we wanted to avoid this for timing reasons). The PTXAS flags
+can also be omitted; these are simply to provide debug information.
+
+Testing instructions
+--------------------
+
+Our work focused on the WebP lossless encoder, so we tested our code using
+the `cwebp` executable with the `-lossless` flag. A command like the
+following would be suitable for testing:
+
+     ./cwebp -lossless ../INPUT/mitski.png -o ../IMAGES/OUTPUT/mitski.webp
