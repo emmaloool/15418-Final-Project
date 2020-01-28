@@ -6,6 +6,9 @@ We implemented one of the stages of the WebP image encoding pipeline on NVIDIA G
 
 Our final project writeup is located [here](final_report.pdf), and our poster is located [here](poster.pdf).
 
+![](poster_preview.png?raw=true "Preview Poster")
+
+
 ### November 18: Project Checkpoint
 
 Our checkpoint report is located [here](checkpoint.pdf).
